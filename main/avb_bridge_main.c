@@ -43,6 +43,8 @@
 #include <sdkconfig.h>
 #include <string.h>
 
+extern void ftm_clock_probe_transport_ready(void) __attribute__((weak));
+
 static const char *TAG = "avb_bridge";
 static esp_eth_handle_t s_eth_handle;
 static char s_avb_eth_interface[10];
@@ -197,6 +199,9 @@ static esp_err_t init_wifi_softap(void) {
 
   WIFI_CHECK(esp_wifi_set_mode(WIFI_MODE_AP), "esp_wifi_set_mode");
   WIFI_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_cfg), "esp_wifi_set_config");
+  /* Keep FTM PHY calibration stable when a 20 MHz station associates. */
+  WIFI_CHECK(esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW20),
+             "esp_wifi_set_bandwidth(20 MHz)");
   /* Power save off on the AP — required for predictable beacon
    * timing once we start publishing FollowUpInformation in the
    * beacon Vendor IE. Leaving it off from boot avoids a
@@ -216,11 +221,12 @@ static esp_err_t init_wifi_softap(void) {
   ESP_ERROR_CHECK(esp_event_handler_register(
       WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, on_ap_sta_disconnected, NULL));
   WIFI_CHECK(esp_wifi_start(), "esp_wifi_start");
-  if (xSemaphoreTake(s_ap_started, pdMS_TO_TICKS(5000)) != pdTRUE) {
-    ESP_LOGW(TAG, "Wi-Fi AP_START event did not fire within 5s; "
-                  "port[1] MAC may be zero");
-  }
+  bool ap_ready = xSemaphoreTake(s_ap_started, pdMS_TO_TICKS(5000)) == pdTRUE;
   esp_event_handler_unregister(WIFI_EVENT, WIFI_EVENT_AP_START, on_ap_start);
+  if (!ap_ready) {
+    ESP_LOGE(TAG, "Wi-Fi AP_START event did not fire within 5s");
+    return ESP_ERR_TIMEOUT;
+  }
 
   ESP_LOGI(TAG, "Wi-Fi SoftAP up: SSID='%s' ch=%d beacon=%d TU max_conn=%d",
            AVB_AP_SSID, AVB_AP_CHANNEL, AVB_AP_BEACON_INTERVAL,
@@ -329,6 +335,7 @@ void app_main(void) {
   /* Wi-Fi port: Sync transport is the beacon Vendor IE; peer-delay is
    * FTM-driven (responder side, no measurement). */
   ptpd_start_port(1, "WIFI_0", ptp_port_medium_wifi_ftm);
+  if (ftm_clock_probe_transport_ready) ftm_clock_probe_transport_ready();
 
   /* Bridge role: port 0 = Ethernet (EMAC), port 1 = Wi-Fi AP. */
   avb_config_s avb_config = AVB_DEFAULT_CONFIG();

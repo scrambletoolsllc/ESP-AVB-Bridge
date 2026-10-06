@@ -54,7 +54,7 @@ list(APPEND EXCLUDE_COMPONENTS lwip esp_netif)
 # app_update supplies esp_ota_ops.h for upstream's slave_control.c. It used
 # to arrive transitively; IDF 6.x tightened component resolution and it must
 # now be listed explicitly, so this line diverges from upstream's allowlist.
-set(COMPONENTS esp_timer esptool_py bootloader main nvs_flash esp_rom esp_wifi protocomm driver mqtt wpa_supplicant wifi_provisioning esp_driver_sdio esp_pm openthread app_update esp_ptp_rpc registry_deps)
+set(COMPONENTS esp_timer esptool_py bootloader main nvs_flash esp_rom esp_wifi protocomm driver mqtt wpa_supplicant wifi_provisioning esp_driver_sdio esp_pm openthread app_update esp_ptp_rpc registry_deps ftm_clock_probe mac_transition_probe ftm_responder_probe)
 
 project(network_adapter)
 idf_build_set_property(COMPILE_OPTIONS "-fdiagnostics-color=always" APPEND)
