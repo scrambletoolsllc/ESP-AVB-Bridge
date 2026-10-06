@@ -1,0 +1,10 @@
+set(clock_sources)
+if(CONFIG_FTM_LOCAL_CLOCK)
+    list(APPEND clock_sources "ftm_local_clock.c")
+endif()
+idf_component_register(SRCS ${clock_sources} INCLUDE_DIRS "include"
+    PRIV_REQUIRES esp_wifi esp_timer esp_hal_systimer WHOLE_ARCHIVE)
+if(CONFIG_FTM_LOCAL_CLOCK)
+    idf_component_get_property(timer_dir esp_timer COMPONENT_DIR)
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${timer_dir}/private_include")
+endif()

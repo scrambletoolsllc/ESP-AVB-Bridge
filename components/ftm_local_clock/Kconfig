@@ -1,0 +1,9 @@
+menu "FTM local clock mapping"
+config FTM_LOCAL_CLOCK
+    bool "Continuously measure C6 MAC to SYSTIMER mapping"
+    depends on IDF_TARGET_ESP32C6
+    default n
+    help
+        Experimental read-only mapping. Does not steer the PTP clock.
+        Publishes fresh bounded snapshots and invalidates on discontinuity.
+endmenu

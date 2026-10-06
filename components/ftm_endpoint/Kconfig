@@ -1,0 +1,41 @@
+menu "FTM endpoint timing"
+    config FTM_ENDPOINT
+        bool "Receive mapped FTM FollowUp observations"
+        depends on IDF_TARGET_ESP32C6 && FTM_LOCAL_CLOCK
+        default n
+    config FTM_ENDPOINT_DISCIPLINE
+        bool "Discipline the software clock using received FTM timing"
+        depends on FTM_ENDPOINT
+        default n
+    config FTM_ENDPOINT_SIGNED_RTT_EXPERIMENT
+        bool "Clock experiment with small signed RTT estimates"
+        depends on FTM_ENDPOINT_DISCIPLINE && FTM_FAILURE_RETAIN
+        default n
+        help
+            Diagnostic only. Retains signed rate-corrected RTT estimates
+            down to -25 ns without clamping or calibration offsets. This
+            guard is an experiment limit, not a calibrated error bound.
+    config FTM_ENDPOINT_PAIR_SELECTION
+        bool "Use independent directional FTM timestamp minima"
+        depends on FTM_ENDPOINT_DISCIPLINE
+        default n
+        help
+            Select forward and reverse timestamps independently over the
+            admitted matched quartets. Recheck the combined delay guard.
+            The SDK burst fallback remains an experimental dependency.
+    config FTM_ENDPOINT_PAIR_SHADOW
+        bool "Compare independent directional timestamp selection"
+        depends on FTM_ENDPOINT_DISCIPLINE
+        default n
+        help
+            Log alternative forward/reverse minima once per eight reports.
+            Diagnostic only, does not alter the clock observation or servo.
+    config FTM_ENDPOINT_LOSS_TEST
+        bool "Suppress timing observations for five seconds after startup"
+        depends on FTM_ENDPOINT_DISCIPLINE
+        default n
+        help
+            Finite diagnostic. Between 60 and 65 seconds after boot, consume
+            reports normally but withhold their clock observations. Announce
+            reception continues. Repeats only after a reboot.
+endmenu
