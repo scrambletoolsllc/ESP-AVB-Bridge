@@ -1,0 +1,20 @@
+menu "Raw FTM clock experiment"
+config FTM_RAW_PROBE
+    bool "Queue raw FTM timestamps for clock model validation"
+    default n
+    depends on IDF_TARGET_ESP32C6
+    help
+        Records existing reports without changing ranging or clock discipline.
+        Bounded nonblocking copies feed a separate logging task.
+config FTM_LIVE_MODEL
+    bool "Evaluate relative FTM clock model without discipline"
+    default n
+    depends on FTM_RAW_PROBE
+config FTM_LIVE_MODEL_SELF_TEST
+    bool "Exercise model expiry and one wireless rejoin"
+    default n
+    depends on FTM_LIVE_MODEL
+    help
+        Diagnostic only: pause model input after one minute and request
+        one Wi-Fi disconnect after six minutes. Repeats on each boot.
+endmenu

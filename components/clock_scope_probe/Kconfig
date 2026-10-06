@@ -1,0 +1,10 @@
+menu "Clock scope diagnostic"
+config CLOCK_SCOPE_PROBE
+    bool "Enable experimental synchronized timing pulses"
+    default n
+    depends on IDF_TARGET_ESP32P4 || IDF_TARGET_ESP32C6
+    help
+        Hardware timer pulses on P4 GPIO45 or endpoint C6 GPIO18.
+        P4 requires Waveshare P4-WIFI6-POE-ETH wiring; enables LDO4 at 3.3 V.
+        Includes scheduling diagnostics; does not enable FTM discipline.
+endmenu

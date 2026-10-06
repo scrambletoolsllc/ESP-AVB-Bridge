@@ -1,0 +1,41 @@
+set(probe_sources)
+if(CONFIG_FTM_FAILURE_PROBE)
+    set(blob_dir "${CMAKE_CURRENT_BINARY_DIR}/blob")
+    file(MAKE_DIRECTORY "${blob_dir}")
+    execute_process(COMMAND ${CMAKE_AR} x "${IDF_PATH}/components/esp_wifi/lib/esp32c6/libnet80211.a" ieee80211_ftm.o WORKING_DIRECTORY "${blob_dir}" COMMAND_ERROR_IS_FATAL ANY)
+    file(SHA256 "${blob_dir}/ieee80211_ftm.o" blob_hash)
+    if(NOT blob_hash STREQUAL "79607f4b192e89b4e2380ec2a332c6d64907af49dfbb8d63f8f7ac901fee4500")
+        message(FATAL_ERROR "FTM failure probe private layout requires the audited Wi-Fi blob")
+    endif()
+    execute_process(COMMAND ${CMAKE_OBJCOPY}
+        --add-symbol ftm_diag_context=.bss.s_ftm_initiator:0,global,object
+        --add-symbol ftm_diag_report=.bss.g_ftm_report_data:0,global,object
+        --add-symbol ftm_diag_report_count=.bss.g_ftm_report_num_entries:0,global,object
+        --add-symbol ftm_diag_vendor=.bss.g_ftm_vendor_data:0,global,object
+        --add-symbol ftm_diag_vendor_count=.bss.g_ftm_vendor_num_entries:0,global,object
+        "${blob_dir}/ieee80211_ftm.o" "${blob_dir}/ftm_diagnostic.o"
+        COMMAND_ERROR_IS_FATAL ANY)
+    list(APPEND probe_sources "ftm_failure_probe.c" "${blob_dir}/ftm_diagnostic.o")
+endif()
+idf_component_register(SRCS ${probe_sources} PRIV_REQUIRES esp_wifi esp_timer esp_system WHOLE_ARCHIVE)
+if(CONFIG_FTM_FAILURE_PROBE)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=wifi_event_post" "-Wl,--wrap=esp_wifi_init")
+endif()
+if(CONFIG_FTM_FAILURE_RX_METADATA)
+    foreach(object IN ITEMS wdev hal_mac)
+        execute_process(COMMAND ${CMAKE_AR} x "${IDF_PATH}/components/esp_wifi/lib/esp32c6/libpp.a" "${object}.o" WORKING_DIRECTORY "${blob_dir}" COMMAND_ERROR_IS_FATAL ANY)
+        file(SHA256 "${blob_dir}/${object}.o" object_hash)
+        if(object STREQUAL "wdev")
+            set(expected_hash "1936550cb69bc8c9f9c92e642751aa42532270e94c0e0e082daea9720cbbe81c")
+        else()
+            set(expected_hash "9a3a51b46fa452656bbdb29306cd496f919ba08df6c8081e9d2ca73a86394537")
+        endif()
+        if(NOT object_hash STREQUAL expected_hash)
+            message(FATAL_ERROR "FTM RX metadata requires the audited ${object} object")
+        endif()
+    endforeach()
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=hal_mac_ftm_get_t3")
+endif()
+if(CONFIG_FTM_FAILURE_ASSOC_TEST)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_wifi_ftm_initiate_session")
+endif()

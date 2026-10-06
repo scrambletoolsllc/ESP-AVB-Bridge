@@ -1,0 +1,17 @@
+menu "FTM responder investigation"
+config FTM_RESPONDER_PROBE
+    bool "Capture responder hardware and converted FTM timestamps"
+    default n
+    depends on IDF_TARGET_ESP32C6
+    help
+        Diagnostic only, requires exact audited Wi-Fi object hashes.
+        Copies timestamps after the existing driver callback and queues
+        records without waiting. Formatting runs in a separate task.
+config FTM_RESPONDER_RX_METADATA
+    bool "Capture responder fine timestamp register fields"
+    default n
+    depends on FTM_RESPONDER_PROBE
+    help
+        Diagnostic only. Reads timestamp slots after the driver callback.
+        Requires an exact stable reconstruction of both hardware timestamps.
+endmenu

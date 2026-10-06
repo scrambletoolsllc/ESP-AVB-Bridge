@@ -1,0 +1,42 @@
+menu "FTM failure investigation"
+config FTM_FAILURE_PROBE
+    bool "Capture rejected reports inside the audited C6 Wi-Fi blob"
+    default n
+    depends on IDF_TARGET_ESP32C6
+    help
+        Diagnostic only. Exposes three private data symbols in a build-local
+        copy of an exact hash-checked blob object. Copies reports before
+        driver cleanup, then formats them in a separate task.
+config FTM_FAILURE_RETAIN
+    bool "Retain discarded quartets and vendor IEs for clock experiments"
+    default n
+    depends on FTM_FAILURE_PROBE
+    help
+        Exact-blob diagnostic only. Copies records before cleanup without
+        changing timestamps or driver classification. Suppresses verbose
+        report logging. Not a portable replacement for a vendor API fix.
+config FTM_FAILURE_RX_METADATA
+    bool "Capture raw RX descriptor timing fields"
+    default n
+    depends on FTM_FAILURE_PROBE
+    help
+        Diagnostic only, gated by the audited wdev and hal_mac object hashes.
+        Copies timing fields after the existing hardware timestamp read.
+        Adds bounded copying and a short lock to the receive path.
+config FTM_FAILURE_ASSOC_TEST
+    bool "Disconnect during the fifth FTM session"
+    default n
+    depends on FTM_FAILURE_PROBE
+    help
+        Diagnostic only. Disconnect 50 ms after the fifth accepted session
+        start to exercise late-report rejection and reassociation recovery.
+        Repeats after reboot; restore a build with this option disabled.
+config FTM_FAILURE_RESET_TEST
+    bool "Run one reconnect and one radio restart after baseline capture"
+    default n
+    depends on FTM_FAILURE_PROBE
+    help
+        Diagnostic only. At 60 seconds after the first report, disconnect
+        and let the application reconnect. At 120 seconds stop/start Wi-Fi.
+        Log completion at 180 seconds. Repeats after each endpoint reboot.
+endmenu

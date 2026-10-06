@@ -1,0 +1,21 @@
+menu "MAC transition diagnostic"
+config MAC_TRANSITION_PROBE
+    bool "Measure MAC transitions against a hardware timer"
+    default n
+    depends on IDF_TARGET_ESP32C6
+    help
+        Bounded clock mapping experiment. Uses one additional GPTimer.
+        Does not change synchronization or drive any GPIO.
+config MAC_TRANSITION_MCPWM
+    bool "Use directly readable MCPWM counter"
+    default n
+    depends on MAC_TRANSITION_PROBE && SOC_MCPWM_SUPPORTED
+    help
+        Compare fine phase modulo 1.5 ms using an unconnected MCPWM timer.
+config MAC_TRANSITION_DIRECT_READ
+    bool "Use verified C6 MAC register instead of API call"
+    default n
+    depends on MAC_TRANSITION_MCPWM
+    help
+        C6 diagnostic only. Requires rechecking the SDK getter disassembly.
+endmenu
