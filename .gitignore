@@ -27,3 +27,6 @@ sdkconfig
 .DS_Store
 *.old
 sdkconfig.old
+
+# Python bytecode from the bench tools
+__pycache__/
