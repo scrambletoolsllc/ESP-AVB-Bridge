@@ -1,0 +1,83 @@
+--- a/slave/main/slave_control.h
++++ b/slave/main/slave_control.h
+@@ -205,7 +205,7 @@
+ esp_err_t rpc_evt_handler(uint32_t session_id,const uint8_t *inbuf,
+ 		ssize_t inlen, uint8_t **outbuf, ssize_t *outlen, void *priv_data);
+ void send_event_to_host(int event_id);
+-void send_event_data_to_host(int event_id, void *data, int size);
++esp_err_t send_event_data_to_host(int event_id, void *data, int size);
+ 
+ #ifdef CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER
+ #include "esp_hosted_peer_data.h"
+--- a/slave/main/esp_hosted_coprocessor.c
++++ b/slave/main/esp_hosted_coprocessor.c
+@@ -511,12 +511,12 @@
+ 	protocomm_pserial_data_ready(pc_pserial, NULL, 0, event_id);
+ }
+ 
+-void send_event_data_to_host(int event_id, void *data, int size)
++esp_err_t send_event_data_to_host(int event_id, void *data, int size)
+ {
+ #if ESP_PKT_STATS
+ 	pkt_stats.serial_tx_evt++;
+ #endif
+-	protocomm_pserial_data_ready(pc_pserial, data, size, event_id);
++	return protocomm_pserial_data_ready(pc_pserial, data, size, event_id);
+ }
+ 
+ static void process_serial_rx_pkt(uint8_t *buf)
+--- a/slave/main/slave_wifi_std.c
++++ b/slave/main/slave_wifi_std.c
+@@ -56,6 +56,21 @@
+ static wifi_init_config_t cached_wifi_init_config = {0};
+ 
+ wifi_event_sta_connected_t lkg_sta_connected_event = {0};
++
++extern uint32_t ftm_radio_association_begin(const uint8_t mac[6], bool joined)
++    __attribute__((weak));
++extern void ftm_radio_association_complete(uint32_t generation, bool queued)
++    __attribute__((weak));
++
++static void forward_ap_lifecycle(int event_id, void *data, int size,
++                                const uint8_t mac[6], bool joined)
++{
++    uint32_t generation = ftm_radio_association_begin ?
++        ftm_radio_association_begin(mac, joined) : 0;
++    esp_err_t result = send_event_data_to_host(event_id, data, size);
++    if (ftm_radio_association_complete)
++        ftm_radio_association_complete(generation, result == ESP_OK);
++}
+ 
+ static void event_handler_wifi(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+ 
+@@ -2200,15 +2215,15 @@
+ 			wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
+ 			ESP_LOGI(TAG, "station "MACSTR" join, AID=%d",
+ 					MAC2STR(event->mac), event->aid);
+-			send_event_data_to_host(RPC_ID__Event_AP_StaConnected,
+-					event_data, sizeof(wifi_event_ap_staconnected_t));
++			forward_ap_lifecycle(RPC_ID__Event_AP_StaConnected,
++					event_data, sizeof(wifi_event_ap_staconnected_t), event->mac, true);
+ 		} else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+ 			wifi_event_ap_stadisconnected_t *event =
+ 				(wifi_event_ap_stadisconnected_t *) event_data;
+ 			ESP_LOGI(TAG, "station "MACSTR" leave, AID=%d",
+ 					MAC2STR(event->mac), event->aid);
+-			send_event_data_to_host(RPC_ID__Event_AP_StaDisconnected,
+-					event_data, sizeof(wifi_event_ap_stadisconnected_t));
++			forward_ap_lifecycle(RPC_ID__Event_AP_StaDisconnected,
++					event_data, sizeof(wifi_event_ap_stadisconnected_t), event->mac, false);
+ 		} else if (event_id == WIFI_EVENT_SCAN_DONE) {
+ 			ESP_LOGI(TAG, "Wi-Fi sta scan done");
+ 			// rpc event receiver expects Scan Done to have this ID
+@@ -2334,8 +2349,8 @@
+ 					ESP_LOGI(TAG,"softap stopped");
+ 					esp_wifi_internal_reg_rxcb(WIFI_IF_AP, NULL);
+ 					softap_started = 0;
+-					send_event_data_to_host(RPC_ID__Event_WifiEventNoArgs,
+-							&event_id, sizeof(event_id));
++					forward_ap_lifecycle(RPC_ID__Event_WifiEventNoArgs,
++							&event_id, sizeof(event_id), NULL, false);
+ 				}
+ 			} else if (event_id == WIFI_EVENT_STA_START) {
+ 				if (!station_connecting) {

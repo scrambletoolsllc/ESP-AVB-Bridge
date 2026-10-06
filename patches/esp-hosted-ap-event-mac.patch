@@ -1,0 +1,20 @@
+--- a/host/drivers/rpc/wrap/rpc_wrap.c
++++ b/host/drivers/rpc/wrap/rpc_wrap.c
+@@ -176,7 +176,7 @@
+ 			break;
+ 		} case RPC_ID__Event_AP_StaConnected: {
+ 			wifi_event_ap_staconnected_t *p_e = &app_event->u.e_wifi_ap_staconnected;
+-			if (strlen((char*)p_e->mac)) {
++			if (memcmp(p_e->mac, (uint8_t[6]){0}, 6) != 0) {
+ 				ESP_LOGI(TAG, "ESP Event: SoftAP mode: station connected with MAC Addr " MACSTR, MAC2STR(p_e->mac));
+ 				g_h.funcs->_h_event_wifi_post(WIFI_EVENT_AP_STACONNECTED,
+ 					p_e, sizeof(wifi_event_ap_staconnected_t), HOSTED_BLOCK_MAX);
+@@ -184,7 +184,7 @@
+ 			break;
+ 		} case RPC_ID__Event_AP_StaDisconnected: {
+ 			wifi_event_ap_stadisconnected_t *p_e = &app_event->u.e_wifi_ap_stadisconnected;
+-			if (strlen((char*)p_e->mac)) {
++			if (memcmp(p_e->mac, (uint8_t[6]){0}, 6) != 0) {
+ 				ESP_LOGI(TAG, "ESP Event: SoftAP mode: disconnected station");
+ 				g_h.funcs->_h_event_wifi_post(WIFI_EVENT_AP_STADISCONNECTED,
+ 					p_e, sizeof(wifi_event_ap_stadisconnected_t), HOSTED_BLOCK_MAX);

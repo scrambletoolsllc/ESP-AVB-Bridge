@@ -1,0 +1,12 @@
+--- a/host/drivers/rpc/wrap/rpc_wrap.c
++++ b/host/drivers/rpc/wrap/rpc_wrap.c
+@@ -1863,7 +1863,8 @@
+ 
+ 		}
+ 	}
+-	sta->num = resp->u.wifi_ap_sta_list.num;
++	sta->num = (resp && resp->resp_event_status == SUCCESS)
++		? resp->u.wifi_ap_sta_list.num : 0;
+ 
+ 	return rpc_rsp_callback(resp);
+ }

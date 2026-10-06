@@ -1,0 +1,17 @@
+--- a/host/drivers/transport/sdio/sdio_drv.c
++++ b/host/drivers/transport/sdio/sdio_drv.c
+@@ -1543,7 +1543,13 @@
+ 		pkt_stats.sta_tx_in_pass++;
+ #endif
+ 
+-	g_h.funcs->_h_queue_item(to_slave_queue[pkt_prio], &buf_handle, HOSTED_BLOCK_MAX);
++	/* Network RX callers must not wait for SDIO data queue capacity. */
++	bool data_frame = iface_type == ESP_STA_IF || iface_type == ESP_AP_IF;
++	int timeout = data_frame ? 0 : HOSTED_BLOCK_MAX;
++	if (g_h.funcs->_h_queue_item(to_slave_queue[pkt_prio], &buf_handle, timeout) != RET_OK) {
++		H_FREE_PTR_WITH_FUNC(free_func, buffer_to_free);
++		return data_frame ? ESP_ERR_NO_MEM : ESP_FAIL;
++	}
+ 	g_h.funcs->_h_post_semaphore(sem_to_slave_queue);
+ 
+ 
