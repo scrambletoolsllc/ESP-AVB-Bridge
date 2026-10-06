@@ -1,0 +1,45 @@
+menu "FTM clock mapping diagnostics"
+    config FTM_CLOCK_PROBE
+        bool "Measure P4/C6 clock mapping over custom RPC"
+        default n
+        help
+            Diagnostic only. Logs timestamp exchanges without adjusting clocks.
+            Enable on both the P4 bridge and its C6 coprocessor.
+    config FTM_CLOCK_PROBE_EDGE
+        bool "Probe onboard P4 GPIO6 to C6 GPIO2 edge capture"
+        depends on FTM_CLOCK_PROBE
+        default n
+        select GPTIMER_CTRL_FUNC_IN_IRAM
+        select PCNT_CTRL_FUNC_IN_IRAM
+        help
+            Diagnostic for the Waveshare ESP32-P4-WIFI6-POE-ETH only.
+            Captures GPIO6 pulses on the P4 and GPIO2 on the C6.
+            Requires the board's R52 connection. Does not discipline clocks.
+    config FTM_CLOCK_PROBE_BRIDGE_MAP
+        bool "Validate live radio-to-upstream clock mapping"
+        depends on FTM_CLOCK_PROBE_EDGE && IDF_TARGET_ESP32P4
+        default n
+        help
+            Task-context prediction check, does not steer a clock or publish IEs.
+    config FTM_CLOCK_PROBE_CORE_AUDIT
+        bool "Compare PTP register capture brackets on both P4 cores"
+        depends on FTM_CLOCK_PROBE_EDGE && IDF_TARGET_ESP32P4
+        default n
+        help
+            Runs a finite read-only comparison before emitting shared edges.
+    config FTM_CLOCK_PROBE_FOLLOW_UP
+        bool "Publish mapped FTM FollowUp timing"
+        depends on FTM_CLOCK_PROBE_EDGE
+        default n
+        help
+            Transfers coherent source snapshots to the onboard radio and
+            fills FTM FollowUp IEs at the reported transmit timestamp.
+            Enable on both boards; P4 also requires BRIDGE_MAP.
+    config FTM_CLOCK_PROBE_FAULT_TEST
+        bool "Run one missing-edge, extra-edge and ignored-ack test"
+        depends on FTM_CLOCK_PROBE_EDGE && IDF_TARGET_ESP32P4
+        default n
+        help
+            Finite diagnostic faults on arm sequences 3, 5 and 7.
+            No clock discipline uses these observations.
+endmenu
