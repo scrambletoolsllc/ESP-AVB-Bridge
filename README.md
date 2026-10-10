@@ -8,7 +8,7 @@ Time-of-day is propagated to wireless endpoints through the AP's
 §12.7 `FollowUpInformation`.
 
 The pairing target is the wireless build of
-[scrambletools/ESP-AVB-Endpoint](https://github.com/scrambletools/ESP-AVB-Endpoint),
+[scrambletoolsllc/ESP-AVB-Endpoint](https://github.com/scrambletoolsllc/ESP-AVB-Endpoint),
 but any Milan-compatible AVB endpoint on the wired side or any STA on
 the SoftAP that speaks AVB-over-Wi-Fi will interoperate.
 
@@ -71,7 +71,7 @@ Target board: **Waveshare ESP32-P4-WiFi6-PoE-ETH**.
 ESP-AVB-Bridge/
   main/                  P4 host application (AVB stack + SoftAP
                          setup). idf_component.yml pulls
-                         scrambletools/esp_avb and esp_ptp from the
+                         scrambletoolsllc/esp_avb and esp_ptp from the
                          ESP Component Registry; esp_ptp_rpc comes in
                          transitively.
   sdkconfig.defaults     P4 host defaults (target=esp32p4, AVB role,

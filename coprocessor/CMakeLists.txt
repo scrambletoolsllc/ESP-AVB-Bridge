@@ -46,7 +46,7 @@ list(APPEND EXCLUDE_COMPONENTS lwip esp_netif)
 
 # Upstream's COMPONENTS allowlist + our esp_ptp_rpc + registry_deps.
 # registry_deps is the stub component that hosts the idf_component.yml
-# declaring scrambletools/esp_ptp_rpc as a managed dependency, since
+# declaring scrambletoolsllc/esp_ptp_rpc as a managed dependency, since
 # upstream slave/main (our `main`) can't be modified. esp_ptp_rpc is
 # also listed so it survives the allowlist filter regardless of
 # whether it resolves to managed_components/ (registry) or
