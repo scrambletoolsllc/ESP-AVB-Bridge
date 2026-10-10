@@ -12,6 +12,14 @@ The pairing target is the wireless build of
 but any Milan-compatible AVB endpoint on the wired side or any STA on
 the SoftAP that speaks AVB-over-Wi-Fi will interoperate.
 
+The source lives at <https://github.com/scrambletoolsllc/ESP-AVB-Bridge>;
+old github.com/scrambletools/... links redirect there. The esp_avb,
+esp_ptp and esp_ptp_rpc components come from the ESP Component
+Registry under the **scrambletools** namespace
+(`scrambletools/esp_avb`, `scrambletools/esp_ptp`,
+`scrambletools/esp_ptp_rpc`), declared in `main/idf_component.yml` and
+`coprocessor/components/registry_deps/idf_component.yml`.
+
 ## issues
 
 - forwarding some unicast traffic from the wired side to the wireless is unstable
