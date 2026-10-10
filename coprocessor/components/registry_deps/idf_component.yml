@@ -1,2 +1,2 @@
 dependencies:
-  scrambletoolsllc/esp_ptp_rpc: "*"
+  scrambletools/esp_ptp_rpc: "*"
