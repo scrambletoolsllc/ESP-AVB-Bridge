@@ -12,6 +12,7 @@
 #include "ftm_discipline.h"
 #include "ftm_pair_selection.h"
 #include "ptp_ftm_clock.h"
+#include "ptp_ftm_success.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -45,6 +46,13 @@ static atomic_uint association_generation = 1;
 static int64_t status_applied_us;
 static uint32_t status_generation, status_association;
 static bool status_phase_ready;
+/* AVB Wireless status (profiles/avb_wireless.md §2.6, §5.1), read from
+ * another task through ptp_ftm_status_hook. */
+#define STATUS_LOCK_WINDOW_US 375000
+static portMUX_TYPE status_lock = portMUX_INITIALIZER_UNLOCKED;
+static int32_t status_error_ns, status_rtt_ns;
+static bool status_error_valid, status_rtt_valid, status_was_locked;
+static ptp_ftm_success_t status_success;
 typedef struct {
     int64_t local_ns, reference_ns, received_us;
     uint32_t association, mapping;
@@ -109,7 +117,11 @@ void ptp_ftm_daemon_tick(void)
         int64_t innovation;
         bool fitted = ftm_discipline_observe(&model, fit_generation, time_base,
             observation.local_ns, observation.reference_ns, &innovation);
-        if (!model.valid) status_phase_ready = false;
+        if (!model.valid) {
+            portENTER_CRITICAL(&status_lock);
+            status_phase_ready = false;
+            portEXIT_CRITICAL(&status_lock);
+        }
         int64_t error = INT64_MIN;
         int32_t applied = 0;
         int result = -1;
@@ -121,10 +133,16 @@ void ptp_ftm_daemon_tick(void)
                 disciplined = true;
                 holdover = false;
                 last_applied_us = esp_timer_get_time();
+                portENTER_CRITICAL(&status_lock);
                 status_applied_us = last_applied_us;
                 status_generation = generation;
                 status_association = observation.association;
                 status_phase_ready = !step && error >= -1000 && error <= 1000;
+                status_was_locked |= status_phase_ready;
+                status_error_valid = error != INT64_MIN;
+                status_error_ns = error > INT32_MAX ? INT32_MAX :
+                    error < INT32_MIN ? INT32_MIN : (int32_t)error;
+                portEXIT_CRITICAL(&status_lock);
             }
         }
         ESP_LOGI("ftm_endpoint", "FTMDISC,%u,%u,%u,%u,%" PRId64 ",%" PRId64 ",%" PRId32 ",%" PRId32 ",%d",
@@ -173,7 +191,7 @@ static bool report_source_consistent(unsigned first, unsigned last)
     return true;
 }
 
-bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
+static bool report_consume(const wifi_event_ftm_report_t *report, double *rtt_ps)
 {
     ++reports;
     unsigned count = report->ftm_report_num_entries, vendor_count = FTM_VENDOR_ENTRIES(report);
@@ -188,7 +206,7 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
         esp_wifi_ftm_get_report(NULL, 0);
         esp_wifi_ftm_get_vendor_data(NULL, 0);
         ESP_LOGI("ftm_endpoint", "FTMRX,%u,%u,%u,%u,0", reports, report->status, count, vendor_count);
-        return true;
+        return false;
     }
     memset(paired, 0, sizeof(paired));
     if (!recovered) {
@@ -196,7 +214,7 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
         memset(vendors, 0, sizeof(vendors));
         esp_err_t report_status = esp_wifi_ftm_get_report(entries, count);
         esp_err_t vendor_status = esp_wifi_ftm_get_vendor_data(vendors, vendor_count);
-        if (report_status != ESP_OK || vendor_status != ESP_OK) return true;
+        if (report_status != ESP_OK || vendor_status != ESP_OK) return false;
     }
     unsigned matches = 0, mismatches = 0;
     for (unsigned index = 0; index < count; ++index) {
@@ -229,17 +247,17 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
         matches += paired[index];
     }
     ESP_LOGI("ftm_endpoint", "FTMRX,%u,%u,%u,%u,%u,%u", reports, report->status, count, vendor_count, matches, mismatches);
-    if (matches < 2) return true;
+    if (matches < 2) return false;
     unsigned first = 0, last = count - 1;
     while (!paired[first]) ++first;
     while (!paired[last]) --last;
-    if (!report_source_consistent(first, last)) return true;
+    if (!report_source_consistent(first, last)) return false;
     uint64_t remote_span = (entries[last].t1 - entries[first].t1) & REMOTE_MASK;
     if (entries[last].t2 <= entries[first].t2 || remote_span < UINT64_C(500000000) ||
-        remote_span > UINT64_C(1500000000000)) return true;
+        remote_span > UINT64_C(1500000000000)) return false;
     uint64_t local_span = entries[last].t2 - entries[first].t2;
     double neighbor_rate = (double)remote_span / local_span;
-    if (!isfinite(neighbor_rate) || fabs(neighbor_rate - 1) > .001) return true;
+    if (!isfinite(neighbor_rate) || fabs(neighbor_rate - 1) > .001) return false;
 #if CONFIG_FTM_ENDPOINT_PAIR_SHADOW || CONFIG_FTM_ENDPOINT_PAIR_SELECTION
     ftm_pair_selection_t independent;
     ftm_pair_selection_init(&independent);
@@ -269,20 +287,20 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
     }
     if (reports % 8 == 0) ESP_LOGI("ftm_endpoint", "FTMQUALITY,%u,%" PRIu64 ",%.6f,%.3f,%.3f,%d",
         reports, remote_span, (neighbor_rate - 1) * 1e6, lowest_rtt / 1000, highest_rtt / 1000, best);
-    if (best < 0) return true;
+    if (best < 0) return false;
     ftm_local_clock_snapshot_t map;
     int64_t local_ns;
     if (!ftm_local_clock_snapshot(&map) || !acquisition_generation ||
         !ftm_local_clock_convert(&map, acquisition_generation, entries[best].t2,
-                                ptp_clock_local_ns(), &local_ns)) return true;
+                                ptp_clock_local_ns(), &local_ns)) return false;
     double reference_rate = 1 + fields[best].cumulative_rate_offset / 2199023255552.0;
     int64_t reference_ns = fields[best].origin_ns + fields[best].correction_scaled / 65536 +
         (int64_t)llround(minimum_rtt * reference_rate / 2000);
     ptp_clock_affine_t clock;
-    if (!ptp_clock_sw_snapshot(&clock)) return true;
+    if (!ptp_clock_sw_snapshot(&clock)) return false;
     int64_t error_ns = reference_ns - ptp_clock_affine_now(&clock, local_ns);
 #if CONFIG_FTM_ENDPOINT_PAIR_SHADOW || CONFIG_FTM_ENDPOINT_PAIR_SELECTION
-    if (independent.forward < 0 || independent.reverse < 0) return true;
+    if (independent.forward < 0 || independent.reverse < 0) return false;
 #if CONFIG_FTM_ENDPOINT_PAIR_SELECTION
     bool compare_pairs = true;
 #else
@@ -307,9 +325,9 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
 #endif
 #if CONFIG_FTM_ENDPOINT_PAIR_SELECTION
 #if CONFIG_FTM_ENDPOINT_SIGNED_RTT_EXPERIMENT
-            if (alternate_rtt < -25000 || alternate_rtt > 2000000) return true;
+            if (alternate_rtt < -25000 || alternate_rtt > 2000000) return false;
 #else
-            if (alternate_rtt < 0 || alternate_rtt > 2000000) return true;
+            if (alternate_rtt < 0 || alternate_rtt > 2000000) return false;
 #endif
             best = forward;
             minimum_rtt = alternate_rtt;
@@ -320,12 +338,12 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
 #endif
         } else {
 #if CONFIG_FTM_ENDPOINT_PAIR_SELECTION
-            return true;
+            return false;
 #endif
         }
     }
 #endif
-    bool suppress_observation = false;
+    bool suppress_observation = false, queued = false;
 #if CONFIG_FTM_ENDPOINT_LOSS_TEST
     int64_t uptime_us = esp_timer_get_time();
     suppress_observation = uptime_us >= 60000000 && uptime_us < 65000000;
@@ -343,11 +361,46 @@ bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
             .domain = fields[best].domain, .log_interval = fields[best].log_interval,
         };
         memcpy(observation.source_port, fields[best].source_port, 10);
-        if (xQueueSend(observations, &observation, 0) != pdTRUE)
-            ESP_LOGW("ftm_endpoint", "clock observation queue full");
+        queued = xQueueSend(observations, &observation, 0) == pdTRUE;
+        if (!queued) ESP_LOGW("ftm_endpoint", "clock observation queue full");
     }
     ESP_LOGI("ftm_endpoint", "FTMOBS,%u,%u,%" PRId64 ",%" PRId64 ",%" PRId64 ",%.3f,%.6f,%u",
         reports, entries[best].dlog_token, local_ns, reference_ns, error_ns,
         minimum_rtt / 1000, (neighbor_rate * reference_rate - 1) * 1e6, map.uncertainty_ns);
+    *rtt_ps = minimum_rtt;
+    return queued;
+}
+
+/* Every consumed report is one measurement attempt; it is valid when it
+ * produced a clock observation. */
+bool ptp_ftm_report_hook(const wifi_event_ftm_report_t *report)
+{
+    double rtt_ps = 0;
+    bool observed = report_consume(report, &rtt_ps);
+    portENTER_CRITICAL(&status_lock);
+    ptp_ftm_success_record(&status_success, esp_timer_get_time(), observed);
+    if (observed) {
+        status_rtt_ns = (int32_t)llround(rtt_ps / 1000);
+        status_rtt_valid = true;
+    }
+    portEXIT_CRITICAL(&status_lock);
+    return true;
+}
+
+bool ptp_ftm_status_hook(ptp_ftm_status_t *status)
+{
+    int64_t now_us = esp_timer_get_time();
+    portENTER_CRITICAL(&status_lock);
+    bool fresh = status_applied_us && now_us - status_applied_us <= STATUS_LOCK_WINDOW_US;
+    *status = (ptp_ftm_status_t){
+        .applied_us = status_applied_us,
+        .error_ns = status_error_ns, .rtt_ns = status_rtt_ns,
+        .success = ptp_ftm_success_percent(&status_success, now_us),
+        .locked = fresh && status_phase_ready &&
+            status_association == atomic_load(&association_generation),
+        .holdover = !fresh && status_was_locked,
+        .error_valid = status_error_valid, .rtt_valid = status_rtt_valid,
+    };
+    portEXIT_CRITICAL(&status_lock);
     return true;
 }
