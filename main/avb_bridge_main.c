@@ -364,9 +364,6 @@ void app_main(void) {
   avb_config.eth_handle = s_eth_handle;
   avb_config.eth_interface = "ETH_0";
   avb_config.wifi_interface = "WIFI_0";
-  /* Allow Class A on Wi-Fi despite the medium not meeting Milan
-   * §5.6 125 µs latency. */
-  avb_config.allow_class_a_over_wifi = true;
 
   bool enable = true;
   if (esp_eth_ioctl(s_eth_handle, ETH_CMD_S_PROMISCUOUS, &enable) != ESP_OK) {
