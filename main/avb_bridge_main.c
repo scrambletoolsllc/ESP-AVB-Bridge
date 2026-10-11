@@ -97,6 +97,24 @@ static void on_ap_sta_disconnected(void *arg, esp_event_base_t base,
  * multiples of 100. */
 #define AVB_AP_BEACON_INTERVAL 100
 
+/* Downlink forwarding runs in two stages: emac_rx hands each frame to the
+ * hosted queue, and the SDIO threads move it to the coprocessor at about
+ * 90 us of CPU per frame. Unpinned, the SDIO writer (priority 23) preempted
+ * emac_rx on its own core at every hand-off, and the RPC threads (23)
+ * time-sliced with it, so a Class B stream overflowed the EMAC RX ring and
+ * starved gPTP, MSRP and the beacon refresh. The hosted threads run on
+ * core 1, the SDIO ones below PTPD and AVB-BR there, and emac_rx keeps
+ * core 0. */
+void hosted_thread_placement(const char *tname, uint32_t *tprio,
+                             BaseType_t *core_id) {
+  if (strncmp(tname, "sdio_", 5) == 0) {
+    *tprio = 21;
+    *core_id = 1;
+  } else if (strncmp(tname, "rpc_", 4) == 0) {
+    *core_id = 1;
+  }
+}
+
 static void init_ethernet_and_netif(void) {
   /* The default event loop may already exist by the time we get here
    * (esp_ptp's ptp_beacon_ie.c creates it from a constructor so it
@@ -114,7 +132,10 @@ static void init_ethernet_and_netif(void) {
   emac_config.dma_burst_len = ETH_DMA_BURST_LEN_32;
   emac_config.intr_priority = 0;
   mac_config.rx_task_stack_size = 16384;
-  mac_config.rx_task_prio = 22;
+  /* Above esp_timer (22), whose 10 ms time slices held off receive, and
+   * pinned to core 0, where this runs (see hosted_thread_placement). */
+  mac_config.rx_task_prio = 23;
+  mac_config.flags |= ETH_MAC_FLAG_PIN_TO_CORE;
   phy_config.phy_addr = 1;
   phy_config.reset_gpio_num = 5;
 

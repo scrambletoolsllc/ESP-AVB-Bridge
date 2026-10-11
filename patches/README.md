@@ -81,3 +81,19 @@ python3 tools/ftm_association/test_lifecycle_hook.py
 
 This patch is built but not yet deployed; host admission and map transport
 integration remain necessary before using its generation to authorize FTM.
+
+`esp-hosted-thread-placement-queue-space.patch` adds two host-side hooks
+for a bridge that forwards a stream. A weak `hosted_thread_placement`
+lets the application set each hosted thread's priority and core by name,
+and `esp_hosted_data_tx_queue_space` reports the free entries in the data
+queue to the coprocessor. Unpinned, the SDIO writer (priority 23)
+preempted `emac_rx` on its own core at every hand-off and the RPC threads
+time-sliced with it, so an 8000 frame/s Class B stream overflowed the EMAC
+RX ring and cost the bridge gPTP, MSRP and the beacon refresh. The bridge
+moves the hosted threads to core 1 and keeps four queue entries for
+control frames. Measured on the bench, EMAC RX overflows under that stream
+fell from about 560 a second to none, with no Pdelay loss.
+
+```sh
+patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-thread-placement-queue-space.patch
+```
