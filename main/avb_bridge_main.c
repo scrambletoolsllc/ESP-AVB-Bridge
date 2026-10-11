@@ -410,7 +410,7 @@ void app_main(void) {
 #ifdef CONFIG_ESP_AVB_WIFI_UNICAST_STREAMS
              "readdr=%lu/nomap=%lu/bpdrop=%lu/restore=%lu  "
 #endif
-             "oom=%lu  STA=%u",
+             "acmp=%lu  oom=%lu  STA=%u",
              (unsigned long)eth_ok, (unsigned long)eth_fail,
              (unsigned long)wifi_ok, (unsigned long)wifi_fail,
              (unsigned long)wifi_ucast, (unsigned long)wifi_mcast,
@@ -419,6 +419,7 @@ void app_main(void) {
              (unsigned long)avb_bridge_forward_stats_bp_drop(),
              (unsigned long)avb_bridge_forward_stats_restored(),
 #endif
+             (unsigned long)avb_bridge_forward_stats_acmp_copies(),
              (unsigned long)wifi_oom, avb_bridge_wifi_ap_sta_count());
   }
 }
