@@ -134,17 +134,18 @@ CONFIG_ETH_IRAM_OPTIMIZATION=y
 CONFIG_ETH_DMA_RX_BUFFER_NUM=30
 CONFIG_ESP_NETIF_L2_TAP_RX_QUEUE_SIZE=64
 CONFIG_ETH_DMA_BUFFER_SIZE=1536
-# Bridge Wi-Fi TX path tuning for AVTP forwarding.
-# - More TX buffers absorb burst arrivals before the aggregator
-#   sends them out.
-# - A wide Block-Ack window lets A-MPDU pack many AVTP frames into
-#   one PHY transmission, which is what makes high-rate streams
-#   fit on 802.11.
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
-# Max BA window for HT/HE — packs up to 64 frames into one A-MPDU,
-# amortising 802.11 per-frame overhead. Chip supports HE so the
-# Kconfig range is 2..64; pre-Wi-Fi-6 silicon caps at 32.
-CONFIG_ESP_WIFI_TX_BA_WIN=64
+# Bridge Wi-Fi tuning for AVTP forwarding. The coprocessor's Wi-Fi init
+# takes its buffer counts and RX Block-Ack window from these host
+# values, not from its own sdkconfig; on the P4 the ESP_WIFI_* names
+# only mirror them, so setting those has no effect. The TX Block-Ack
+# window is not passed and comes from the coprocessor's sdkconfig.
+# The RX window is what the AP grants each station: at the default of 6
+# a station's uplink A-MPDU carries at most 6 frames. 32 carries a
+# 4000 frame/s Class B talker (measured). It needs at least 32 dynamic
+# and 16 static RX buffers on the coprocessor.
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
+CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=48
+CONFIG_WIFI_RMT_RX_BA_WIN=32
 # Pin the Wi-Fi work to CPU1. EMAC RX runs at high priority on CPU0
 # (where the IDF emac_esp32_rx_task drains the DMA ring); moving the
 # Wi-Fi MAC/TX work off CPU0 keeps EMAC RX from being preempted while
