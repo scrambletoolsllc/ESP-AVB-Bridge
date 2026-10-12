@@ -39,7 +39,6 @@
 #include <ethernet_init.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-#include <nvs_flash.h>
 #include <sdkconfig.h>
 #include <string.h>
 
@@ -183,13 +182,6 @@ static void init_ethernet_and_netif(void) {
     }                                                                          \
   } while (0)
 static esp_err_t init_wifi_softap(void) {
-  esp_err_t ret = nvs_flash_init();
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-      ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ESP_ERROR_CHECK(nvs_flash_init());
-  }
-
   /* AP netif is an L2 bridge member — no L3, so ESP_NETIF_FLAG_AUTOUP
    * keeps it up regardless. if_key="WIFI_0" must match the value
    * passed via avb_config.wifi_interface so port[1] binds here. */
