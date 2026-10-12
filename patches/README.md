@@ -70,17 +70,20 @@ python3 tools/hosted_rpc/test_ap_event_mac.py
 `esp-hosted-association-lifecycle.patch` applies to the separate
 `esp-hosted-mcu` coprocessor tree. It returns the actual enqueue result from
 `send_event_data_to_host` and adds optional begin/complete hooks around AP
-join, leave and stop notification forwarding. The FTM component uses these
-hooks to retire snapshots before enqueue and track whether the notification
-was accepted. A successful enqueue is not proof of host event processing.
+join, leave and stop notification forwarding. esp_ptp_rpc implements these
+hooks: it keeps the access point's association list and sends it to the host
+after each notification, and the host's gPTP sends a station Announce and
+Signaling only once its peers match that list. The FTM probe follows the same
+list to retire snapshots. A successful enqueue is not proof of host event
+processing.
 
 ```sh
 patch -d ../esp-hosted-mcu -p1 < patches/esp-hosted-association-lifecycle.patch
 python3 tools/ftm_association/test_lifecycle_hook.py
 ```
 
-This patch is built but not yet deployed; host admission and map transport
-integration remain necessary before using its generation to authorize FTM.
+Without this patch the coprocessor does not report association changes, and
+the host serves stations from its own association events.
 
 `esp-hosted-thread-placement-queue-space.patch` adds two host-side hooks
 for a bridge that forwards a stream. A weak `hosted_thread_placement`

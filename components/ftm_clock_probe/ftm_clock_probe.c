@@ -16,6 +16,9 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "edge_capture_state.h"
+#if CONFIG_IDF_TARGET_ESP32C6
+#include "ptp_custom_rpc.h"
+#endif
 #if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
 #include "ftm_transfer.h"
 #include "ftm_radio_association.h"
@@ -139,19 +142,26 @@ static DRAM_ATTR ftm_association_state_t association_map;
 static DRAM_ATTR uint32_t admitted_radio_generation;
 static DRAM_ATTR int64_t tx_prepared_us[TX_SNAPSHOT_COUNT];
 
-uint32_t ftm_radio_association_begin(const uint8_t mac[6], bool joined)
+_Static_assert(PTP_RPC_ASSOCIATIONS_MAX == FTM_ASSOC_MAX,
+               "esp_ptp_rpc and the FTM map list the same stations");
+
+/* esp_ptp_rpc owns the AP's associations and reports them to the host;
+ * the FTM map follows its generation, and every change retires it. */
+void ptp_rpc_associations_changed(const ptp_rpc_associations_t *associations)
 {
     portENTER_CRITICAL(&tx_lock);
-    uint32_t generation = ftm_radio_association_change(&radio_associations, mac, joined);
+    radio_associations.generation = associations->generation;
+    radio_associations.count = associations->count;
+    radio_associations.forwarded = false;
+    memcpy(radio_associations.macs, associations->macs, sizeof(radio_associations.macs));
     admitted_radio_generation = 0;
     ftm_association_retire_all(&association_map);
     for (unsigned index = 0; index < TX_SNAPSHOT_COUNT; ++index)
         tx_snapshots[index].valid = false;
     portEXIT_CRITICAL(&tx_lock);
-    return generation;
 }
 
-void ftm_radio_association_complete(uint32_t generation, bool queued)
+void ptp_rpc_associations_forwarded(uint32_t generation, bool queued)
 {
     portENTER_CRITICAL(&tx_lock);
     ftm_radio_association_forwarded(&radio_associations, generation, queued);
@@ -530,15 +540,6 @@ static void receive_request(uint32_t message_id, const uint8_t *data,
     response.edge = latest_edge;
     portEXIT_CRITICAL(&edge_lock);
 #endif
-#if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
-    portENTER_CRITICAL(&tx_lock);
-    if (radio_associations.forwarded) {
-        response.association_generation = radio_associations.generation;
-        response.association_count = radio_associations.count;
-        memcpy(response.association_macs, radio_associations.macs, sizeof(response.association_macs));
-    }
-    portEXIT_CRITICAL(&tx_lock);
-#endif
     response.send_us = esp_timer_get_time();
 #if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
     if (!(response.request.sequence % 5))
@@ -586,7 +587,8 @@ static void observe_ftm_request(void *context, esp_event_base_t base, int32_t id
 static void probe_task(void *context)
 {
     (void)context;
-    boot_id = esp_random() | 1U;
+    /* The radio's identity in esp_ptp_rpc's association reports. */
+    boot_id = ptp_rpc_radio_boot();
     esp_log_level_set("slave_rpc", ESP_LOG_WARN);
     esp_log_level_set("ptp", ESP_LOG_WARN);
 #if CONFIG_FTM_CLOCK_PROBE_EDGE
@@ -635,31 +637,6 @@ static ftm_bridge_clock_t bridge_clock;
 static ftm_bridge_observation_t host_clock_anchor;
 static ptp_timing_snapshot_t host_clock_source;
 #if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
-ESP_EVENT_DEFINE_BASE(FTM_ASSOCIATION_EVENT);
-typedef struct {
-    uint32_t radio_boot, generation, count;
-    uint8_t macs[FTM_ASSOC_MAX][6];
-    int64_t received_us;
-} host_association_event_t;
-
-static void reconcile_associations(void *context, esp_event_base_t base, int32_t id, void *data)
-{
-    (void)context; (void)base; (void)id;
-    const host_association_event_t *event = data;
-    int64_t age = esp_timer_get_time() - event->received_us;
-    if (event->radio_boot != armed_coprocessor_boot || age < 0 || age >= FTM_ASSOC_MAX_AGE_US)
-        return;
-    static uint32_t previous_boot, previous_generation;
-    bool accepted = ptpd_wifi_association_reconcile(1, event->radio_boot, event->generation,
-                                                    event->macs, event->count);
-    if (accepted && (previous_boot != event->radio_boot || previous_generation != event->generation)) {
-        previous_boot = event->radio_boot;
-        previous_generation = event->generation;
-        ESP_LOGI(TAG, "HOSTASSOC,%" PRIu32 ",%" PRIu32 ",%" PRIu32,
-            event->radio_boot, event->generation, event->count);
-    }
-}
-
 static void publish_associations(const ptp_timing_snapshot_t *source)
 {
     static uint32_t publication;
@@ -983,15 +960,6 @@ static void receive_response(uint32_t message_id, const uint8_t *data,
     if (observation.response.request.version != PROBE_VERSION ||
         observation.response.request.host_boot != boot_id)
         return;
-#if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
-    if (observation.response.association_generation && observation.response.association_count <= FTM_ASSOC_MAX) {
-        host_association_event_t event = {.radio_boot = observation.response.coprocessor_boot,
-            .generation = observation.response.association_generation,
-            .count = observation.response.association_count, .received_us = receive_us};
-        memcpy(event.macs, observation.response.association_macs, sizeof(event.macs));
-        (void)esp_event_post(FTM_ASSOCIATION_EVENT, 0, &event, sizeof(event), 0);
-    }
-#endif
     if (xQueueSend(observations, &observation, 0) != pdTRUE)
         ESP_LOGW(TAG, "observation queue full");
 }
@@ -1096,9 +1064,6 @@ static void probe_task(void *context)
     }
     ESP_ERROR_CHECK(esp_hosted_register_custom_callback(
         PROBE_RESPONSE_ID, receive_response, NULL));
-#if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
-    ESP_ERROR_CHECK(esp_event_handler_register(FTM_ASSOCIATION_EVENT, 0, reconcile_associations, NULL));
-#endif
 #if CONFIG_FTM_CLOCK_PROBE_EDGE
     initialize_host_capture();
 #if CONFIG_FTM_CLOCK_PROBE_CORE_AUDIT
