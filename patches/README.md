@@ -100,3 +100,20 @@ fell from about 560 a second to none, with no Pdelay loss.
 ```sh
 patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-thread-placement-queue-space.patch
 ```
+
+`esp-hosted-bounded-data-rx.patch` applies to the `esp-hosted-mcu`
+coprocessor tree. The AP's receive callback runs on the coprocessor's Wi-Fi
+task and hands each frame to `sdio_write`, which waited without limit for an
+SDIO send slot and logged every failed buffer allocation at error level. Once
+a station's uplink outran the host, the Wi-Fi task blocked or spent its time
+on console output, so the AP stopped beaconing and never recovered. A data
+frame now takes a send slot only without waiting and only while more than two
+remain, which keeps a slot for RPC and event traffic; otherwise it is dropped
+and counted, with a summary at most every 10 s. The mempool's allocation
+failure log is rate limited. Measured on the bench with a 4000 frame/s
+station talker behind a 32-frame Block Ack window: the AP stays up and the
+coprocessor drops under 0.1 % of uplink frames over a 90 s run.
+
+```sh
+patch -d ../esp-hosted-mcu -p1 < patches/esp-hosted-bounded-data-rx.patch
+```
