@@ -147,9 +147,14 @@ static void init_ethernet_and_netif(void) {
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_vfs_l2tap_intf_register(NULL));
 
+  /* Like the AP netif, an L2 bridge member with no L3: frames for the
+   * bridge are forwarded, never delivered to its IP stack, so a DHCP
+   * client would only repeat Discovers on the AVB network. */
   esp_netif_inherent_config_t base = ESP_NETIF_INHERENT_DEFAULT_ETH();
   esp_netif_config_t cfg = {.base = &base,
                             .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH};
+  base.flags = ESP_NETIF_FLAG_AUTOUP;
+  base.ip_info = NULL;
   base.if_key = "ETH_0";
   base.if_desc = "eth0";
   base.route_prio = 50;
