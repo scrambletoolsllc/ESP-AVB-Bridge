@@ -88,7 +88,7 @@ CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
 # locally on the C6. Default upstream is y, set explicitly here to
 # pin the value.
 CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER=y
-CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=4
+CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=8
 
 # Restart the P4 when the SDIO transport reports a runtime failure
 # (e.g., C6 reset / wedged underneath us). Combined with the
