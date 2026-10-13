@@ -397,6 +397,22 @@ void app_main(void) {
     uint32_t readdr = 0, nomap = 0;
     avb_bridge_forward_stats_readdress(&readdr, &nomap);
 #endif
+    uint32_t paced = 0, pace_overflow = 0, pace_depth = 0;
+    avb_bridge_forward_stats_paced(&paced, &pace_overflow, &pace_depth);
+    uint32_t bundles_tx = 0, bundle_frames_tx = 0, bundles_rx = 0,
+             bundle_frames_rx = 0;
+    uint32_t retx_nacks = 0, retx_sent = 0, retx_stale = 0;
+    uint32_t in_lost = 0, in_late = 0, in_bypass = 0, split_fail = 0;
+    uint32_t pace_no_tspec = 0, pace_no_entry = 0;
+    avb_bridge_pacer_bypass_stats(&pace_no_tspec, &pace_no_entry);
+#ifdef CONFIG_ESP_AVB_WIFI_BUNDLE
+    avb_bridge_forward_stats_bundles(&bundles_tx, &bundle_frames_tx);
+    avb_bridge_retx_stats(&retx_nacks, &retx_sent, &retx_stale);
+    avb_bridge_bundle_ingress_stats(&in_lost, &in_late, &in_bypass);
+#endif
+    avb_wifi_bundle_rx_stats(&bundles_rx, &bundle_frames_rx, &split_fail);
+    uint32_t up_nacks = 0, up_rec = 0, up_gaveup = 0, up_dup = 0;
+    avb_wifi_retx_stats(&up_nacks, &up_rec, &up_gaveup, &up_dup);
     if (first_ucast_ms == 0 && wifi_ucast > 0) {
       first_ucast_ms = esp_log_timestamp();
       ESP_LOGI(TAG, "first wifi-egress UNICAST forward succeeded at uptime=%lums",
@@ -407,7 +423,11 @@ void app_main(void) {
 #ifdef CONFIG_ESP_AVB_WIFI_UNICAST_STREAMS
              "readdr=%lu/nomap=%lu/bpdrop=%lu/restore=%lu  "
 #endif
-             "acmp=%lu  oom=%lu  STA=%u",
+             "paced=%lu/%lu depth=%lu bypass=%lu/%lu  bundles tx=%lu/%lu rx=%lu/%lu  "
+             "ingress lost=%lu late=%lu bypass=%lu split_fail=%lu  "
+             "retx nack=%lu sent=%lu stale=%lu  "
+             "uplink nack=%lu rec=%lu gaveup=%lu dup=%lu  "
+             "acmp=%lu  oom=%lu  STA=%u  iram_free=%u/%u",
              (unsigned long)eth_ok, (unsigned long)eth_fail,
              (unsigned long)wifi_ok, (unsigned long)wifi_fail,
              (unsigned long)wifi_ucast, (unsigned long)wifi_mcast,
@@ -416,7 +436,19 @@ void app_main(void) {
              (unsigned long)avb_bridge_forward_stats_bp_drop(),
              (unsigned long)avb_bridge_forward_stats_restored(),
 #endif
+             (unsigned long)paced, (unsigned long)pace_overflow,
+             (unsigned long)pace_depth, (unsigned long)pace_no_tspec,
+             (unsigned long)pace_no_entry, (unsigned long)bundles_tx,
+             (unsigned long)bundle_frames_tx, (unsigned long)bundles_rx,
+             (unsigned long)bundle_frames_rx, (unsigned long)in_lost,
+             (unsigned long)in_late, (unsigned long)in_bypass,
+             (unsigned long)split_fail, (unsigned long)retx_nacks,
+             (unsigned long)retx_sent, (unsigned long)retx_stale,
+             (unsigned long)up_nacks, (unsigned long)up_rec,
+             (unsigned long)up_gaveup, (unsigned long)up_dup,
              (unsigned long)avb_bridge_forward_stats_acmp_copies(),
-             (unsigned long)wifi_oom, avb_bridge_wifi_ap_sta_count());
+             (unsigned long)wifi_oom, avb_bridge_wifi_ap_sta_count(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
   }
 }
