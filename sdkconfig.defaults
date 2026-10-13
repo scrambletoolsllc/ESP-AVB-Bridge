@@ -53,6 +53,12 @@ CONFIG_ESP_PTP_ANNOUNCE_INTERVAL_MS=1000
 # AVB on Ethernet but Class B on Wi-Fi (Phase 5).
 CONFIG_ESP_AVB_AVB_LITE_COMPLIANT=y
 
+# Stream frames toward a station travel several to a Wi-Fi frame, and
+# lost bundles are asked for again; the stations must run the same
+# esp_avb (receiving bundles is always enabled there).
+CONFIG_ESP_AVB_WIFI_BUNDLE=y
+CONFIG_ESP_AVB_WIFI_BUNDLE_FRAMES=8
+
 # ESP-Hosted SDIO host configuration for the Waveshare
 # ESP32-P4-WIFI6-PoE-ETH onboard P4 ↔ C6 bus.
 #
