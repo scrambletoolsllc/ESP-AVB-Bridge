@@ -171,6 +171,14 @@ CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
+# esp-hosted starts its threads from a constructor, before the scheduler,
+# while only the low DIRAM residue after .bss is in the heap. With their
+# stacks there, about 130 bytes of IRAM or static growth (enabling the
+# clock scope probe was enough) left no room for the idle task stacks,
+# and every boot asserted in vApplicationGetIdleTaskMemory. The stacks go
+# to PSRAM; task control blocks and DMA buffers stay internal.
+CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y
+
 # The bridge is an always-on device that never enters light sleep, so
 # the sleep-clock ICG retention module is dead weight, and worse, it
 # was the boot cliff: its REGDMA lists allocate from the RETENT_RAM
