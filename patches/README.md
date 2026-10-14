@@ -117,3 +117,21 @@ coprocessor drops under 0.1 % of uplink frames over a 90 s run.
 ```sh
 patch -d ../esp-hosted-mcu -p1 < patches/esp-hosted-bounded-data-rx.patch
 ```
+
+`esp-hosted-sdio-tx-coalesce.patch` sends the data frames queued behind
+the current one in the same SDIO write, each in its own 1536-byte receive
+buffer on the coprocessor, up to four per write. Measured on the bridge,
+every host write to the coprocessor's receive FIFO costs about 600 µs
+whatever its size, plus about 50 µs per 512-byte block; reads and register
+writes do not pay it, and it does not change with the bus clock, so it
+sits in the coprocessor's receive path. One write per frame capped the
+Wi-Fi downlink at about 900 frames a second of 1.3 KB. With four frames to
+a write the bridge carried an 8-channel Class B stream, 3700 frames a
+second, with queue drops falling from 860 to 15 a second. The coprocessor
+reads each buffer as a packet of its own and needs no change. The patch
+also resets the write task's per-frame state each pass, so an empty
+dequeue can no longer resend a stale handle.
+
+```sh
+patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-sdio-tx-coalesce.patch
+```

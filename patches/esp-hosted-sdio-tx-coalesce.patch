@@ -1,0 +1,138 @@
+--- a/host/drivers/transport/sdio/sdio_drv.c
++++ b/host/drivers/transport/sdio/sdio_drv.c
+@@ -596,6 +596,109 @@
+ 	return BUFFER_AVAILABLE;
+ }
+ 
++/* Data frames already queued behind the current one go to the
++ * coprocessor in the same CMD53, one per receive buffer: each write costs
++ * a fixed ~600 us on top of its data time, so one write of several
++ * buffers moves several frames for little more than the price of one.
++ * The coprocessor reads every buffer as a packet of its own. */
++#define H_SDIO_TX_COALESCE_MAX 4
++static uint8_t *tx_coalesce_buf;
++
++static bool sdio_is_data_frame(const interface_buffer_handle_t *buf_handle)
++{
++	return buf_handle->if_type == ESP_STA_IF || buf_handle->if_type == ESP_AP_IF;
++}
++
++static uint32_t sdio_tx_fill_segment(uint8_t *segment, const interface_buffer_handle_t *buf_handle)
++{
++	struct esp_payload_header *header = (struct esp_payload_header *)segment;
++	uint16_t len = buf_handle->payload_len;
++	const uint8_t *src = buf_handle->payload_zcopy ?
++		buf_handle->payload + sizeof(struct esp_payload_header) : buf_handle->payload;
++
++	memset(header, 0, sizeof(*header));
++	header->len = htole16(len);
++	header->offset = htole16(sizeof(struct esp_payload_header));
++	header->if_type = buf_handle->if_type;
++	header->if_num = buf_handle->if_num;
++	header->seq_num = htole16(buf_handle->seq_num);
++	header->flags = buf_handle->flag;
++	UPDATE_HEADER_TX_PKT_NO(header);
++	g_h.funcs->_h_memcpy(segment + sizeof(struct esp_payload_header), src, len);
++#if H_SDIO_CHECKSUM
++	header->checksum = htole16(compute_checksum(segment,
++		sizeof(struct esp_payload_header) + len));
++#endif
++	return sizeof(struct esp_payload_header) + len;
++}
++
++static void sdio_tx_release(interface_buffer_handle_t *buf_handle)
++{
++	if (buf_handle->payload_zcopy) {
++		H_FREE_PTR_WITH_FUNC(buf_handle->free_buf_handle, buf_handle->payload);
++	} else {
++		H_FREE_PTR_WITH_FUNC(buf_handle->free_buf_handle, buf_handle->priv_buffer_handle);
++	}
++}
++
++/* Send first and the data frames queued behind it. Consumes them all. */
++static void sdio_tx_coalesced(interface_buffer_handle_t *first)
++{
++	interface_buffer_handle_t batch[H_SDIO_TX_COALESCE_MAX];
++	int count = 0;
++	uint32_t total = 0;
++	int ret;
++
++	batch[count++] = *first;
++	while (count < H_SDIO_TX_COALESCE_MAX) {
++		if (g_h.funcs->_h_get_semaphore(sem_to_slave_queue, 0))
++			break;
++		if (g_h.funcs->_h_dequeue_item(to_slave_queue[PRIO_Q_OTHERS], &batch[count], 0)) {
++			/* the waiting item is in another queue: leave it */
++			g_h.funcs->_h_post_semaphore(sem_to_slave_queue);
++			break;
++		}
++		if (!batch[count].payload_len || batch[count].payload_len >
++				ESP_RX_BUFFER_SIZE - sizeof(struct esp_payload_header)) {
++			sdio_tx_release(&batch[count]);
++			continue;
++		}
++		count++;
++	}
++
++	for (int i = 0; i < count; i++) {
++		uint32_t used = sdio_tx_fill_segment(tx_coalesce_buf + i * ESP_RX_BUFFER_SIZE, &batch[i]);
++		total = i * ESP_RX_BUFFER_SIZE + used;
++	}
++
++	SDIO_DRV_LOCK();
++	ret = sdio_is_write_buffer_available(count);
++	if (ret == BUFFER_AVAILABLE) {
++		uint32_t block_send_len = ((total + ESP_BLOCK_SIZE - 1) / ESP_BLOCK_SIZE) * ESP_BLOCK_SIZE;
++		int retries = 0;
++		do {
++			ret = g_h.funcs->_h_sdio_write_block(sdio_handle, ESP_SLAVE_CMD53_END_ADDR - total,
++				tx_coalesce_buf, block_send_len, ACQUIRE_LOCK);
++		} while (ret && ++retries < MAX_SDIO_WRITE_RETRY);
++		if (ret) {
++			SDIO_DRV_UNLOCK();
++			ESP_LOGE(TAG, "Unrecoverable host sdio state");
++			g_h.funcs->_h_event_post(ESP_HOSTED_EVENT, ESP_HOSTED_EVENT_TRANSPORT_FAILURE,
++				NULL, 0, HOSTED_BLOCK_MAX);
++#if H_TRANSPORT_RESTART_ON_FAILURE
++			g_h.funcs->_h_restart_host();
++#endif
++			goto release;
++		}
++		sdio_tx_buf_count += count;
++		sdio_tx_buf_count = sdio_tx_buf_count % ESP_TX_BUFFER_MAX;
++	}
++	SDIO_DRV_UNLOCK();
++release:
++	for (int i = 0; i < count; i++)
++		sdio_tx_release(&batch[i]);
++}
++
+ static void sdio_write_task(void const* pvParameters)
+ {
+ 	uint16_t len = 0;
+@@ -620,6 +723,9 @@
+ 	for (;;) {
+ 		/* Check if higher layers have anything to transmit */
+ 		g_h.funcs->_h_get_semaphore(sem_to_slave_queue, HOSTED_BLOCK_MAX);
++		tx_needed = 1;
++		len = 0;
++		flag = 0;
+ 
+ 		/* Tx msg is present as per sem */
+ 		if (g_h.funcs->_h_dequeue_item(to_slave_queue[PRIO_Q_SERIAL], &buf_handle, 0))
+@@ -642,6 +748,15 @@
+ 			pkt_stats.sta_tx_trans_in++;
+ #endif
+ 
++		if (!tx_coalesce_buf)
++			tx_coalesce_buf = g_h.funcs->_h_malloc_align(
++				H_SDIO_TX_COALESCE_MAX * ESP_RX_BUFFER_SIZE, HOSTED_MEM_ALIGNMENT_64);
++		if (tx_coalesce_buf && sdio_is_data_frame(&buf_handle) &&
++				buf_handle.payload_len <= ESP_RX_BUFFER_SIZE - sizeof(struct esp_payload_header)) {
++			sdio_tx_coalesced(&buf_handle);
++			continue;
++		}
++
+ 		if (!buf_handle.payload_zcopy) {
+ 			sendbuf = sdio_buffer_alloc(MEMSET_REQUIRED);
+ 			free_func = sdio_buffer_free;
