@@ -105,11 +105,21 @@ static void on_ap_sta_disconnected(void *arg, esp_event_base_t base,
  * time-sliced with it, so a Class B stream overflowed the EMAC RX ring and
  * starved gPTP, MSRP and the beacon refresh. The hosted threads run on
  * core 1, the SDIO ones below PTPD and AVB-BR there, and emac_rx keeps
- * core 0. */
+ * core 0. On receive, sdio_read fills one half of a double buffer while
+ * sdio_rx_buf unpacks the other into the queue sdio_process_rx drains,
+ * and a read that completes before sdio_rx_buf has finished is dropped
+ * whole. At one priority sdio_read got the core whenever the other two
+ * were preempted (FreeRTOS resumes the next thread of equal priority)
+ * or sdio_rx_buf waited on a full queue, about 40 reads an hour, so it
+ * runs one level below both. */
 void hosted_thread_placement(const char *tname, uint32_t *tprio,
                              BaseType_t *core_id) {
-  if (strncmp(tname, "sdio_", 5) == 0) {
+  if (strcmp(tname, "sdio_rx_buf") == 0 ||
+      strcmp(tname, "sdio_process_rx") == 0) {
     *tprio = 21;
+    *core_id = 1;
+  } else if (strncmp(tname, "sdio_", 5) == 0) {
+    *tprio = 20;
     *core_id = 1;
   } else if (strncmp(tname, "rpc_", 4) == 0) {
     *core_id = 1;
