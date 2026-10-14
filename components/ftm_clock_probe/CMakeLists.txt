@@ -1,5 +1,6 @@
 set(probe_requirements esp_timer esp_wifi esp_system ftm_follow_up
-    esp_driver_gpio esp_driver_gptimer esp_driver_pcnt esp_hw_support esp_ptp_rpc)
+    esp_driver_gpio esp_driver_gptimer esp_driver_pcnt esp_hw_support
+    esp_hosted_avb)
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND probe_requirements esp_ptp ftm_bridge_clock)
 endif()

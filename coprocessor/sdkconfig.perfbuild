@@ -3750,10 +3750,10 @@ CONFIG_VFS_INITIALIZE_DEV_NULL=y
 # end of Virtual file system
 
 #
-# ESP-PTP RPC
+# ESP-Hosted AVB
 #
-CONFIG_PTP_RPC_BUILD_COPROCESSOR_HANDLER=y
-# end of ESP-PTP RPC
+CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y
+# end of ESP-Hosted AVB
 
 #
 # Console Command: WiFi

@@ -5,7 +5,7 @@ menu "FTM clock mapping diagnostics"
         help
             Bench diagnostic. Logs timestamp exchanges without adjusting
             clocks. Enable on both the P4 bridge and its C6 coprocessor.
-            Stations do not need it: esp_ptp_rpc reports the access
+            Stations do not need it: esp_hosted_avb reports the access
             point's associations, which gate their Announce.
     config FTM_CLOCK_PROBE_EDGE
         bool "Probe onboard P4 GPIO6 to C6 GPIO2 edge capture"
@@ -36,7 +36,7 @@ menu "FTM clock mapping diagnostics"
         help
             Mode A time over FTM: transfers coherent source snapshots to
             the onboard radio and fills FTM FollowUp IEs at the reported
-            transmit timestamp, following esp_ptp_rpc's association
+            transmit timestamp, following esp_hosted_avb's association
             reports. Enable on both boards; P4 also requires BRIDGE_MAP.
     config FTM_CLOCK_PROBE_FAULT_TEST
         bool "Run one missing-edge, extra-edge and ignored-ack test"

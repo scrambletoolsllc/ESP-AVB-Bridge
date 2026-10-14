@@ -70,7 +70,7 @@ python3 tools/hosted_rpc/test_ap_event_mac.py
 `esp-hosted-association-lifecycle.patch` applies to the separate
 `esp-hosted-mcu` coprocessor tree. It returns the actual enqueue result from
 `send_event_data_to_host` and adds optional begin/complete hooks around AP
-join, leave and stop notification forwarding. esp_ptp_rpc implements these
+join, leave and stop notification forwarding. esp_hosted_avb implements these
 hooks: it keeps the access point's association list and sends it to the host
 after each notification, and the host's gPTP sends a station Announce and
 Signaling only once its peers match that list. The FTM probe follows the same

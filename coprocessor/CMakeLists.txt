@@ -1,7 +1,7 @@
 # Build root for the ESP-AVB-Bridge coprocessor firmware.
 #
 # Mirrors upstream esp-hosted-mcu/slave/CMakeLists.txt with two additions:
-# pulls in the esp_ptp_rpc component (symlinked into components/) and
+# pulls in the esp_hosted_avb component (symlinked into components/) and
 # chains this directory's sdkconfig.defaults on top of upstream's.
 # Upstream's slave/main is mounted unchanged via the `main` symlink.
 # partitions.esp32c6.csv is also a symlink to upstream. No upstream
@@ -44,17 +44,17 @@ set(SDKCONFIG_DEFAULTS
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 list(APPEND EXCLUDE_COMPONENTS lwip esp_netif)
 
-# Upstream's COMPONENTS allowlist + our esp_ptp_rpc + registry_deps.
+# Upstream's COMPONENTS allowlist + our esp_hosted_avb + registry_deps.
 # registry_deps is the stub component that hosts the idf_component.yml
-# declaring scrambletools/esp_ptp_rpc as a managed dependency, since
-# upstream slave/main (our `main`) can't be modified. esp_ptp_rpc is
+# declaring scrambletools/esp_hosted_avb as a managed dependency, since
+# upstream slave/main (our `main`) can't be modified. esp_hosted_avb is
 # also listed so it survives the allowlist filter regardless of
 # whether it resolves to managed_components/ (registry) or
-# components/esp_ptp_rpc/ (developer override symlink).
+# components/esp_hosted_avb/ (developer override symlink).
 # app_update supplies esp_ota_ops.h for upstream's slave_control.c. It used
 # to arrive transitively; IDF 6.x tightened component resolution and it must
 # now be listed explicitly, so this line diverges from upstream's allowlist.
-set(COMPONENTS esp_timer esptool_py bootloader main nvs_flash esp_rom esp_wifi protocomm driver mqtt wpa_supplicant wifi_provisioning esp_driver_sdio esp_pm openthread app_update esp_ptp_rpc registry_deps ftm_clock_probe mac_transition_probe ftm_responder_probe)
+set(COMPONENTS esp_timer esptool_py bootloader main nvs_flash esp_rom esp_wifi protocomm driver mqtt wpa_supplicant wifi_provisioning esp_driver_sdio esp_pm openthread app_update esp_hosted_avb registry_deps ftm_clock_probe mac_transition_probe ftm_responder_probe)
 
 project(network_adapter)
 idf_build_set_property(COMPILE_OPTIONS "-fdiagnostics-color=always" APPEND)

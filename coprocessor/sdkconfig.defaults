@@ -3,9 +3,9 @@
 # here inherits from upstream. Only customizations the AVB-Wireless-AP
 # project genuinely needs belong in this file.
 
-# Build the coprocessor-side PTP custom-RPC handler from the
-# esp_ptp_rpc component (symlinked into ./components/).
-CONFIG_PTP_RPC_BUILD_COPROCESSOR_HANDLER=y
+# Build the coprocessor-side handler from the
+# esp_hosted_avb component (symlinked into ./components/).
+CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y
 
 # Bring-up diagnostics: verbose bootloader logs on the coprocessor's
 # UART0 so flash/boot issues are visible without rebuilding. Bootloader
@@ -49,5 +49,5 @@ CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
 # burst of up to the Block Ack window; 20 slots overflowed under a
 # 4000 frame/s station talker behind a 32-frame window.
 CONFIG_ESP_SDIO_TX_Q_SIZE=40
-# esp_ptp_rpc registers two custom message handlers and the FTM probe two.
+# esp_hosted_avb registers three custom message handlers and the FTM probe two.
 CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=8

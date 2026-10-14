@@ -17,7 +17,7 @@
 #include "freertos/task.h"
 #include "edge_capture_state.h"
 #if CONFIG_IDF_TARGET_ESP32C6
-#include "ptp_custom_rpc.h"
+#include "hosted_avb.h"
 #endif
 #if CONFIG_FTM_CLOCK_PROBE_FOLLOW_UP
 #include "ftm_transfer.h"
@@ -142,12 +142,13 @@ static DRAM_ATTR ftm_association_state_t association_map;
 static DRAM_ATTR uint32_t admitted_radio_generation;
 static DRAM_ATTR int64_t tx_prepared_us[TX_SNAPSHOT_COUNT];
 
-_Static_assert(PTP_RPC_ASSOCIATIONS_MAX == FTM_ASSOC_MAX,
-               "esp_ptp_rpc and the FTM map list the same stations");
+_Static_assert(HOSTED_AVB_ASSOCIATIONS_MAX == FTM_ASSOC_MAX,
+               "esp_hosted_avb and the FTM map list the same stations");
 
-/* esp_ptp_rpc owns the AP's associations and reports them to the host;
+/* esp_hosted_avb owns the AP's associations and reports them to the host;
  * the FTM map follows its generation, and every change retires it. */
-void ptp_rpc_associations_changed(const ptp_rpc_associations_t *associations)
+void hosted_avb_associations_changed(
+    const hosted_avb_associations_t *associations)
 {
     portENTER_CRITICAL(&tx_lock);
     radio_associations.generation = associations->generation;
@@ -161,7 +162,7 @@ void ptp_rpc_associations_changed(const ptp_rpc_associations_t *associations)
     portEXIT_CRITICAL(&tx_lock);
 }
 
-void ptp_rpc_associations_forwarded(uint32_t generation, bool queued)
+void hosted_avb_associations_forwarded(uint32_t generation, bool queued)
 {
     portENTER_CRITICAL(&tx_lock);
     ftm_radio_association_forwarded(&radio_associations, generation, queued);
@@ -587,8 +588,8 @@ static void observe_ftm_request(void *context, esp_event_base_t base, int32_t id
 static void probe_task(void *context)
 {
     (void)context;
-    /* The radio's identity in esp_ptp_rpc's association reports. */
-    boot_id = ptp_rpc_radio_boot();
+    /* The radio's identity in esp_hosted_avb's association reports. */
+    boot_id = hosted_avb_radio_boot();
     esp_log_level_set("slave_rpc", ESP_LOG_WARN);
     esp_log_level_set("ptp", ESP_LOG_WARN);
 #if CONFIG_FTM_CLOCK_PROBE_EDGE

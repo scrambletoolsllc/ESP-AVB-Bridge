@@ -14,10 +14,10 @@ the SoftAP that speaks AVB-over-Wi-Fi will interoperate.
 
 The source lives at <https://github.com/scrambletoolsllc/ESP-AVB-Bridge>;
 old github.com/scrambletools/... links redirect there. The esp_avb,
-esp_ptp and esp_ptp_rpc components come from the ESP Component
+esp_ptp and esp_hosted_avb components come from the ESP Component
 Registry under the **scrambletools** namespace
 (`scrambletools/esp_avb`, `scrambletools/esp_ptp`,
-`scrambletools/esp_ptp_rpc`), declared in `main/idf_component.yml` and
+`scrambletools/esp_hosted_avb`), declared in `main/idf_component.yml` and
 `coprocessor/components/registry_deps/idf_component.yml`.
 
 ## issues
@@ -52,7 +52,7 @@ Target board: **Waveshare ESP32-P4-WiFi6-PoE-ETH**.
   through `esp_wifi_remote` / `esp_hosted`.
 - **ESP32-C6** (onboard coprocessor) — Wi-Fi radio, reached over
   4-bit SDIO. Runs the upstream ESP-Hosted slave firmware unmodified,
-  overlaid with the `esp_ptp_rpc` handler that the host calls into to
+  overlaid with the `esp_hosted_avb` handler that the host calls into to
   install the beacon Vendor IE.
 - SDIO wiring (4-bit, slot 1, from the board schematic):
 
@@ -80,7 +80,7 @@ ESP-AVB-Bridge/
   main/                  P4 host application (AVB stack + SoftAP
                          setup). idf_component.yml pulls
                          scrambletools/esp_avb and esp_ptp from the
-                         ESP Component Registry; esp_ptp_rpc comes in
+                         ESP Component Registry; esp_hosted_avb comes in
                          transitively.
   sdkconfig.defaults     P4 host defaults (target=esp32p4, AVB role,
                          esp_ptp port topology, ESP-Hosted SDIO
@@ -90,9 +90,9 @@ ESP-AVB-Bridge/
 
   coprocessor/           Coprocessor (C6) firmware build root.
     CMakeLists.txt       Mirrors upstream esp-hosted-mcu/slave but
-                         pulls in esp_ptp_rpc + chains our defaults.
+                         pulls in esp_hosted_avb + chains our defaults.
     sdkconfig.defaults   Coprocessor overrides
-                         (CONFIG_PTP_RPC_BUILD_COPROCESSOR_HANDLER=y).
+                         (CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y).
 ```
 
 No manual setup is required for the host build — the AVB / gPTP /
@@ -112,7 +112,7 @@ once both sides are in place.
 ### 1. Coprocessor (C6) firmware
 
 The coprocessor runs Espressif's upstream ESP-Hosted slave firmware
-overlaid with the `esp_ptp_rpc` handler. The slave is not distributed
+overlaid with the `esp_hosted_avb` handler. The slave is not distributed
 as a registry component (it's its own project mounted via local
 symlinks), so a one-time setup script fetches it and wires the
 symlinks in:
@@ -131,13 +131,13 @@ ESP_HOSTED_MCU_DIR=~/src/esp-hosted-mcu ./setup-coprocessor.sh
 
 The script is idempotent — re-running it just refreshes the symlinks.
 
-`esp_ptp_rpc` is a registry component. The stub manifest at
+`esp_hosted_avb` is a registry component. The stub manifest at
 `coprocessor/components/registry_deps/` declares it so the IDF
 Component Manager pulls it into `managed_components/` automatically
 on first build. (The stub exists because the coprocessor's `main/`
 is symlinked to upstream `slave/main` and we can't add a manifest
-there.) Developers working on `esp_ptp_rpc` locally can place a
-symlink at `coprocessor/components/esp_ptp_rpc` — that path is
+there.) Developers working on `esp_hosted_avb` locally can place a
+symlink at `coprocessor/components/esp_hosted_avb` — that path is
 gitignored and takes precedence over the managed copy.
 
 Build and flash via the C6's debug UART on the H7 header (auto-reset
@@ -154,8 +154,8 @@ The build chains three sdkconfig defaults files:
 1. upstream `esp-hosted-mcu/slave/sdkconfig.defaults`
 2. upstream `esp-hosted-mcu/slave/sdkconfig.defaults.esp32c6`
 3. `coprocessor/sdkconfig.defaults` (our overrides — most importantly
-   `CONFIG_PTP_RPC_BUILD_COPROCESSOR_HANDLER=y`, which compiles in the
-   handler that responds to `PTP_RPC_MSG_SET_VENDOR_IE_REQ` from the
+   `CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y`, which compiles in the
+   handler that responds to `HOSTED_AVB_MSG_SET_VENDOR_IE_REQ` from the
    host)
 
 ### 2. Host (P4) firmware
@@ -210,7 +210,7 @@ esptool.py --port /dev/<serial-device> read_mac    # → "Chip type: ESP32-P4" o
   P4.
 - **SoftAP is up but the wireless endpoint never sees the bridge's
   Vendor IE.** Check that the C6 firmware was built with
-  `CONFIG_PTP_RPC_BUILD_COPROCESSOR_HANDLER=y` (the override in
+  `CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y` (the override in
   `coprocessor/sdkconfig.defaults`). Without it the install request
   from the host is silently dropped on the coprocessor side.
 - **Wired controller doesn't see frames from a wireless endpoint
@@ -224,7 +224,7 @@ esptool.py --port /dev/<serial-device> read_mac    # → "Chip type: ESP32-P4" o
 ## Open source
 
 This bridge application and the underlying `esp_avb` / `esp_ptp` /
-`esp_ptp_rpc` components were initially developed by Scramble Tools
+`esp_hosted_avb` components were initially developed by Scramble Tools
 LLC and are released under the MIT license to encourage AVB-over-Wi-Fi
 experimentation across the community.
 

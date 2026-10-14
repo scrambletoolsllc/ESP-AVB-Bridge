@@ -6,10 +6,10 @@
 # is mounted into the coprocessor build via local symlinks. This
 # script fetches that upstream source and wires the symlinks in.
 #
-# (esp_ptp_rpc, by contrast, is a registry component pulled by the
+# (esp_hosted_avb, by contrast, is a registry component pulled by the
 # stub manifest at coprocessor/components/registry_deps/. Developers
 # who want to edit it locally can place a symlink at
-# coprocessor/components/esp_ptp_rpc — that path is gitignored and
+# coprocessor/components/esp_hosted_avb — that path is gitignored and
 # overrides the managed copy.)
 #
 # Idempotent — safe to re-run. The host (P4) firmware does not need

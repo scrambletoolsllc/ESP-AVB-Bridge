@@ -1,7 +1,7 @@
 # ESP-AVB-Bridge defaults — Waveshare ESP32-P4-WiFi6-PoE-ETH (ESP1):
 # P4 host owns Ethernet + AVB stack; onboard C6 over SDIO is the Wi-Fi
 # coprocessor (built from coprocessor/ via the upstream
-# esp-hosted-mcu/slave example overlaid with esp_ptp_rpc).
+# esp-hosted-mcu/slave example overlaid with esp_hosted_avb).
 
 CONFIG_IDF_TARGET="esp32p4"
 
