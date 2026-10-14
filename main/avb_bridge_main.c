@@ -295,6 +295,16 @@ static esp_err_t init_wifi_softap(void) {
     return ESP_ERR_TIMEOUT;
   }
 
+  /* A station that vanished without leaving keeps being served until the
+   * AP's inactivity timeout, 300 s by default, and meanwhile gPTP and the
+   * streams of the other stations suffer. Stations send gPTP and MSRP
+   * every second, so 15 s of silence means gone. Only accepted once the
+   * AP has started. */
+  esp_err_t idle_err = esp_wifi_set_inactive_time(WIFI_IF_AP, 15);
+  if (idle_err != ESP_OK)
+    ESP_LOGW(TAG, "esp_wifi_set_inactive_time failed (%s)",
+             esp_err_to_name(idle_err));
+
   ESP_LOGI(TAG, "Wi-Fi SoftAP up: SSID='%s' ch=%d beacon=%d TU max_conn=%d",
            AVB_AP_SSID, AVB_AP_CHANNEL, AVB_AP_BEACON_INTERVAL,
            AVB_AP_MAX_CONN);
