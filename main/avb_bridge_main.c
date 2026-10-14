@@ -30,6 +30,7 @@
 #include <esp_eth.h>
 #include <esp_eth_phy_ip101.h>
 #include <esp_event.h>
+#include <esp_hosted_misc.h>
 #include <esp_intr_alloc.h>
 #include <esp_log.h>
 #include <esp_netif.h>
@@ -39,6 +40,7 @@
 #include <ethernet_init.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <hosted_avb_proto.h>
 #include <sdkconfig.h>
 #include <string.h>
 
@@ -168,6 +170,52 @@ static void init_ethernet_and_netif(void) {
   ESP_ERROR_CHECK(esp_eth_start(s_eth_handle));
 }
 
+/* 802.11b off on the AP: beacons, management and group addressed frames
+ * go at 6 Mbps OFDM instead of 1 Mbps DSSS. esp-hosted does not forward
+ * esp_wifi_config_11b_rate, so esp_hosted_avb makes the call on the
+ * coprocessor, where it takes effect only before esp_wifi_start. */
+#define AP_11B_ACK_TIMEOUT_MS 1000
+static SemaphoreHandle_t s_ap_11b_acked;
+static volatile int32_t s_ap_11b_result;
+
+static void on_ap_11b_rate_ack(uint32_t msg_id, const uint8_t *data,
+                               size_t data_len, void *user) {
+  (void)msg_id;
+  (void)user;
+  hosted_avb_config_11b_rate_ack_t ack;
+  if (data == NULL || data_len < sizeof(ack)) {
+    return;
+  }
+  memcpy(&ack, data, sizeof(ack));
+  s_ap_11b_result = ack.esp_err;
+  xSemaphoreGive(s_ap_11b_acked);
+}
+
+static void disable_ap_11b_rates(void) {
+  const hosted_avb_config_11b_rate_t request = {.ifx = WIFI_IF_AP,
+                                                .disable = 1};
+  s_ap_11b_acked = xSemaphoreCreateBinary();
+  if (s_ap_11b_acked == NULL ||
+      esp_hosted_register_custom_callback(HOSTED_AVB_MSG_CONFIG_11B_RATE_ACK,
+                                          on_ap_11b_rate_ack, NULL) != ESP_OK ||
+      esp_hosted_send_custom_data(HOSTED_AVB_MSG_CONFIG_11B_RATE_REQ,
+                                  (const uint8_t *)&request,
+                                  sizeof(request)) != ESP_OK) {
+    ESP_LOGW(TAG, "802.11b request not sent; beacons stay at 1 Mbps");
+    return;
+  }
+  if (xSemaphoreTake(s_ap_11b_acked, pdMS_TO_TICKS(AP_11B_ACK_TIMEOUT_MS)) !=
+      pdTRUE) {
+    ESP_LOGW(TAG, "No 802.11b ACK from the coprocessor (needs esp_hosted_avb "
+                  "0.5.0); beacons stay at 1 Mbps");
+  } else if (s_ap_11b_result != ESP_OK) {
+    ESP_LOGW(TAG, "Coprocessor could not turn 802.11b off (%s)",
+             esp_err_to_name(s_ap_11b_result));
+  } else {
+    ESP_LOGI(TAG, "802.11b rates off on the AP");
+  }
+}
+
 /* SoftAP brought up via esp_wifi_remote (SDIO RPC to the coprocessor).
  * Returning the error from any esp_wifi_* call lets app_main esp_restart;
  * combined with the configured coprocessor reset on every host boot this
@@ -225,6 +273,7 @@ static esp_err_t init_wifi_softap(void) {
    * beacon Vendor IE. Leaving it off from boot avoids a
    * later runtime toggle. */
   WIFI_CHECK(esp_wifi_set_ps(WIFI_PS_NONE), "esp_wifi_set_ps");
+  disable_ap_11b_rates();
 
   /* Set up the AP_START gate before esp_wifi_start so we don't miss
    * the event. esp_avb's port[1] init reads the netif MAC immediately;
