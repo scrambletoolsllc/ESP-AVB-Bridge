@@ -1,24 +1,40 @@
-# Overrides applied on top of upstream esp-hosted-mcu/slave's
-# sdkconfig.defaults and sdkconfig.defaults.esp32c6. Anything not set
-# here inherits from upstream. Only customizations the AVB-Wireless-AP
-# project genuinely needs belong in this file.
+CONFIG_IDF_TARGET="esp32c6"
 
-# Build the coprocessor-side handler from the
-# esp_hosted_avb component (symlinked into ./components/).
+# esp-hosted coprocessor for an MCU host over SDIO, RPC v2, with Wi-Fi and
+# peer data (esp_hosted_avb's messages).
+CONFIG_ESP_HOSTED=y
+CONFIG_ESP_HOSTED_CP=y
+CONFIG_ESP_HOSTED_CP_FOR_MCU=y
+CONFIG_ESP_HOSTED_CP_RPC_V2=y
+CONFIG_ESP_HOSTED_CP_FEAT_WIFI=y
+CONFIG_ESP_HOSTED_CP_FEAT_PEER_DATA=y
+CONFIG_EH_TRANSPORT_CP_SDIO=y
 CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y
+
+# The bridge uses no Bluetooth.
+CONFIG_BT_ENABLED=n
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_ESP_WIFI_IRAM_OPT=y
+CONFIG_ESP_WIFI_RX_IRAM_OPT=y
 
 # Bring-up diagnostics: verbose bootloader logs on the coprocessor's
 # UART0 so flash/boot issues are visible without rebuilding. Bootloader
 # output is boot-only, so it costs nothing in steady state.
 CONFIG_BOOTLOADER_LOG_LEVEL_VERBOSE=y
-# Runtime log level is INFO, NOT DEBUG. At DEBUG the slave hex-dumps
-# every bus_RX packet to UART0; at 115200 baud that alone caps the
-# Wi-Fi data path at a few tens of packets/s and starves recv_task
-# badly enough to trip the task watchdog. UART TX blocks whether or
-# not anything is listening on the wire, so this throttles the bridge
+# Runtime log level is INFO, NOT DEBUG. At DEBUG the coprocessor
+# hex-dumps every bus_RX packet to UART0; at 115200 baud that alone caps
+# the Wi-Fi data path at a few tens of packets/s. UART TX blocks whether
+# or not anything is listening on the wire, so this throttles the bridge
 # in normal operation, not just when a console is attached.
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
-
 
 # FTM: responder on the SoftAP per IEEE 802.1AS-2020 §12.1.2. STAs
 # initiate FTM bursts against the AP; this side must respond.
@@ -45,9 +61,3 @@ CONFIG_ESP_WIFI_RX_BA_WIN=64
 # STATIC_RX_BUFFER_NUM * 2 >= 64; IDF's wifi_init.c #errors otherwise.
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=32
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
-# SDIO send slots toward the host. A station's A-MPDU arrives as a
-# burst of up to the Block Ack window; 20 slots overflowed under a
-# 4000 frame/s station talker behind a 32-frame window.
-CONFIG_ESP_SDIO_TX_Q_SIZE=40
-# esp_hosted_avb registers three custom message handlers and the FTM probe two.
-CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=8

@@ -18,7 +18,7 @@ esp_ptp and esp_hosted_avb components come from the ESP Component
 Registry under the **scrambletools** namespace
 (`scrambletools/esp_avb`, `scrambletools/esp_ptp`,
 `scrambletools/esp_hosted_avb`), declared in `main/idf_component.yml` and
-`coprocessor/components/registry_deps/idf_component.yml`.
+`coprocessor/main/idf_component.yml`.
 
 ## issues
 
@@ -51,9 +51,9 @@ Target board: **Waveshare ESP32-P4-WiFi6-PoE-ETH**.
   AVB stack and gPTP master, and dispatches the Wi-Fi side over SDIO
   through `esp_wifi_remote` / `esp_hosted`.
 - **ESP32-C6** (onboard coprocessor) — Wi-Fi radio, reached over
-  4-bit SDIO. Runs the upstream ESP-Hosted slave firmware unmodified,
-  overlaid with the `esp_hosted_avb` handler that the host calls into to
-  install the beacon Vendor IE.
+  4-bit SDIO. Runs the coprocessor side of the `espressif/esp_hosted`
+  component, with the `esp_hosted_avb` handler that the host calls into
+  to install the beacon Vendor IE.
 - SDIO wiring (4-bit, slot 1, from the board schematic):
 
   | Signal | P4 pin | C6 pin |
@@ -89,17 +89,17 @@ ESP-AVB-Bridge/
     sdio_avb_link/       Bridge-local SDIO link helpers.
 
   coprocessor/           Coprocessor (C6) firmware build root.
-    CMakeLists.txt       Mirrors upstream esp-hosted-mcu/slave but
-                         pulls in esp_hosted_avb + chains our defaults.
-    sdkconfig.defaults   Coprocessor overrides
+    main/                Coprocessor app; idf_component.yml pulls
+                         espressif/esp_hosted and esp_hosted_avb.
+    sdkconfig.defaults   Coprocessor defaults
                          (CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y).
+  patches/               Local fixes to the managed esp_hosted copies.
 ```
 
-No manual setup is required for the host build — the AVB / gPTP /
-RPC components are managed dependencies and idf.py installs them
-into `managed_components/` automatically on first build. The
-coprocessor build has one additional prerequisite (cloning upstream
-`esp-hosted-mcu` source); see *Building and flashing* below.
+No manual setup is required for either build — the AVB / gPTP /
+RPC components and esp_hosted are managed dependencies and idf.py
+installs them into `managed_components/` automatically on first
+build. Apply the fixes in `patches/` after that first install.
 
 ## Building and flashing
 
@@ -111,34 +111,12 @@ once both sides are in place.
 
 ### 1. Coprocessor (C6) firmware
 
-The coprocessor runs Espressif's upstream ESP-Hosted slave firmware
-overlaid with the `esp_hosted_avb` handler. The slave is not distributed
-as a registry component (it's its own project mounted via local
-symlinks), so a one-time setup script fetches it and wires the
-symlinks in:
-
-```
-./setup-coprocessor.sh
-```
-
-By default the script clones the upstream source into `./.deps/`
-(gitignored). To point at a pre-existing checkout instead, override
-via env var:
-
-```
-ESP_HOSTED_MCU_DIR=~/src/esp-hosted-mcu ./setup-coprocessor.sh
-```
-
-The script is idempotent — re-running it just refreshes the symlinks.
-
-`esp_hosted_avb` is a registry component. The stub manifest at
-`coprocessor/components/registry_deps/` declares it so the IDF
-Component Manager pulls it into `managed_components/` automatically
-on first build. (The stub exists because the coprocessor's `main/`
-is symlinked to upstream `slave/main` and we can't add a manifest
-there.) Developers working on `esp_hosted_avb` locally can place a
-symlink at `coprocessor/components/esp_hosted_avb` — that path is
-gitignored and takes precedence over the managed copy.
+The coprocessor runs the coprocessor side of the `espressif/esp_hosted`
+component, the same version as the host, with the `esp_hosted_avb`
+handler. Both are registry components that idf.py installs on first
+build. Developers working on `esp_hosted_avb` locally can place a
+symlink at `coprocessor/components/esp_hosted_avb` (gitignored); it
+takes precedence over the managed copy.
 
 Build and flash via the C6's debug UART on the H7 header (auto-reset
 wired):
@@ -149,14 +127,11 @@ idf.py -C coprocessor build
 idf.py -C coprocessor -p /dev/<serial-device> flash
 ```
 
-The build chains three sdkconfig defaults files:
-
-1. upstream `esp-hosted-mcu/slave/sdkconfig.defaults`
-2. upstream `esp-hosted-mcu/slave/sdkconfig.defaults.esp32c6`
-3. `coprocessor/sdkconfig.defaults` (our overrides — most importantly
-   `CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y`, which compiles in the
-   handler that responds to `HOSTED_AVB_MSG_SET_VENDOR_IE_REQ` from the
-   host)
+`coprocessor/sdkconfig.defaults` holds the whole coprocessor
+configuration: the esp-hosted coprocessor role and features, the Wi-Fi
+tuning, and `CONFIG_HOSTED_AVB_BUILD_COPROCESSOR_HANDLER=y`, which
+compiles in the handler that responds to
+`HOSTED_AVB_MSG_SET_VENDOR_IE_REQ` from the host.
 
 ### 2. Host (P4) firmware
 
@@ -172,9 +147,9 @@ idf.py -p /dev/<serial-device> flash monitor
 Key host-side defaults baked into `sdkconfig.defaults`:
 
 - `CONFIG_IDF_TARGET="esp32p4"`, P4 silicon rev v1.3 settings
-- `CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y`, slot 1, 4-bit bus
+- `CONFIG_ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO=y`, slot 1, 4-bit bus
   (matches the schematic wiring above, no pin overrides needed)
-- `CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER=y` — the additive RPC
+- `CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y` — the additive RPC
   channel that carries the Vendor IE install request to the C6
 - `CONFIG_ESP_PTP_NUM_PORTS=2` with `PORT0=ethernet+bridged` and
   `PORT1=wifi_cp+bridged+ap`. The matching `esp_avb` symbols
@@ -201,9 +176,8 @@ esptool.py --port /dev/<serial-device> read_mac    # → "Chip type: ESP32-P4" o
 
 ## Troubleshooting
 
-- **Boot loop with `transport: Not able to connect with ESP-Hosted
-  slave device` on the host UART.** The C6 coprocessor isn't
-  responding to the SDIO handshake. Most often the C6's Wi-Fi
+- **Boot loop with the host reporting that the coprocessor did not come
+  up.** The C6 coprocessor isn't responding to the SDIO handshake. Most often the C6's Wi-Fi
   packet-processing queue has saturated and the C6 firmware has wedged.
   Recovery: hold the P4 in reset (so it stops pulsing GPIO54), then
   re-flash the C6 via `idf.py -C coprocessor flash`, then release the

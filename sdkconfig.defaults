@@ -1,7 +1,7 @@
 # ESP-AVB-Bridge defaults — Waveshare ESP32-P4-WiFi6-PoE-ETH (ESP1):
 # P4 host owns Ethernet + AVB stack; onboard C6 over SDIO is the Wi-Fi
-# coprocessor (built from coprocessor/ via the upstream
-# esp-hosted-mcu/slave example overlaid with esp_hosted_avb).
+# coprocessor (built from coprocessor/ on the esp_hosted component,
+# with esp_hosted_avb).
 
 CONFIG_IDF_TARGET="esp32p4"
 
@@ -63,7 +63,7 @@ CONFIG_ESP_AVB_WIFI_BUNDLE_FRAMES=8
 # ESP32-P4-WIFI6-PoE-ETH onboard P4 ↔ C6 bus.
 #
 # Actual wiring (re-read from the schematic 4-bit SDIO bus, cross-wired
-# between P4 host slot-1 IOMUX pins and C6 slave HW-fixed IOMUX pins):
+# between P4 host slot-1 IOMUX pins and C6 coprocessor HW-fixed IOMUX pins):
 #   Signal  C6 chip pin   P4 chip pin    Net name on schematic
 #   CLK     GPIO19        GPIO18          GPIO18
 #   CMD     GPIO18        GPIO19          GPIO19
@@ -73,51 +73,45 @@ CONFIG_ESP_AVB_WIFI_BUNDLE_FRAMES=8
 #   D3      GPIO23        GPIO17          GPIO17
 # Each line has a 51 kΩ pull-up to ESP_3V3.
 #
-# CMD/CLK appear "swapped" between host and slave because both ICs
-# place those signals on each other's nominal pins — the schematic's
-# net names follow the P4 host pin numbers, not the C6 slave's.
+# CMD/CLK appear "swapped" between host and coprocessor because both ICs
+# place those signals on each other's nominal pins, the schematic's
+# net names follow the P4 host pin numbers, not the C6's.
 #
 # Bus width: 4-bit. ESP-Hosted's P4 defaults (slot 1, 4-bit, CMD=19,
 # CLK=18, D0..D3=14..17) match this wiring, so we don't override pins.
-CONFIG_ESP_HOSTED_ENABLE=y
-CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED=y
+CONFIG_ESP_HOSTED_HOST=y
+CONFIG_ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO=y
 CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
-CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+CONFIG_ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4=y
+CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
 
-# Peer data transfer / Custom RPC. ESP-Hosted's standard protobuf RPC
-# catalogue does not expose esp_wifi_set_vendor_ie (the host-side stub
-# at managed_components/.../host/api/src/esp_hosted_api.c is commented
-# out, and the locally-linked libnet80211 has no radio behind it). We
-# bridge it via this additive channel — host calls
-# esp_hosted_send_custom_data(AVB_RPC_MSG_SET_VENDOR_IE_REQ, ...), the
-# slave's avb_custom_rpc.c handler invokes esp_wifi_set_vendor_ie()
-# locally on the C6. Default upstream is y, set explicitly here to
-# pin the value.
-CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER=y
-CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=8
+# Peer data transfer / Custom RPC. ESP-Hosted's RPC catalogue does not
+# expose the coprocessor-only Wi-Fi calls the bridge needs (vendor IE,
+# association list, 802.11b rates). esp_hosted_avb carries them on this
+# additive channel. Off by default in 3.x.
+CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
+CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA_MAX_CUSTOM_MSG_HANDLERS=8
 
 # Restart the P4 when the SDIO transport reports a runtime failure
-# (e.g., C6 reset / wedged underneath us). Combined with the
-# SLAVE_RESET_ON_EVERY_HOST_BOOTUP knob below, each restart pulses
-# GPIO 54 to bring the C6 to a known state, so recovery converges.
-CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=y
+# (e.g., C6 reset / wedged underneath us). Combined with the reset on
+# every host boot below, each restart pulses GPIO 54 to bring the C6 to
+# a known state, so recovery converges.
+CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y
 
-# Pulse the C6 reset GPIO on every host boot. _ONLY_IF_NECESSARY gates
-# the GPIO reset on transport_card_init failure, but the observed wedge
-# is "card init succeeds, C6 firmware never sends ESP_PRIV_EVENT_INIT" —
-# that path doesn't reach the reset branch. Resetting unconditionally
-# costs ~1.5 s per boot but covers both dead-controller and
-# wedged-slave-firmware cases. The thrash of an associated STA's per-STA
+# Pulse the C6 reset GPIO on every host boot. The observed wedge is
+# "card init succeeds, coprocessor firmware never reports ready", which a
+# reset only on card init failure would miss. Resetting unconditionally
+# costs ~1.5 s per boot. The thrash of an associated STA's per-STA
 # wifi-driver TX scheduler that this triggers is handled on the endpoint
 # side (esp_ptp's TSF-discontinuity detection forces a clean reauth).
-CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP=y
-# CONFIG_ESP_HOSTED_SLAVE_RESET_ONLY_IF_NECESSARY is not set
+CONFIG_ESP_HOSTED_HOST_CP_RESET_STRATEGY_ALWAYS=y
 
-# Host restarts itself if the slave never sends INIT within the
-# configured timeout (default 5 s). Together with the GPIO-reset on
-# next boot, this converts "slave wedged" into a self-healing
+# Host restarts itself if the coprocessor does not come up within the
+# bring-up timeout (default 5 s). Together with the GPIO reset on the
+# next boot, this converts a wedged coprocessor into a self-healing
 # reboot/reset cycle rather than silent half-bridge degradation.
-CONFIG_ESP_HOSTED_HOST_RESTART_NO_COMMUNICATION_WITH_SLAVE=y
+CONFIG_ESP_HOSTED_HOST_CP_BRINGUP_ON_TIMEOUT_RESTART=y
 
 # ISR stack is PER-CORE, so the P4 pays this twice. The previous 6144
 # (12 KiB total, 4x the IDF default of 1536) starved RETENT_RAM below
@@ -171,12 +165,11 @@ CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
-# esp-hosted starts its threads from a constructor, before the scheduler,
-# while only the low DIRAM residue after .bss is in the heap. With their
-# stacks there, about 130 bytes of IRAM or static growth (enabling the
-# clock scope probe was enough) left no room for the idle task stacks,
-# and every boot asserted in vApplicationGetIdleTaskMemory. The stacks go
-# to PSRAM; task control blocks and DMA buffers stay internal.
+# esp-hosted thread stacks go to PSRAM; task control blocks and DMA
+# buffers stay internal. 2.x started its threads from a constructor,
+# before the scheduler, while only the low DIRAM residue after .bss is in
+# the heap, and about 130 bytes of IRAM or static growth then left no
+# room for the idle task stacks. 3.x starts only its init thread there.
 CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y
 
 # The bridge is an always-on device that never enters light sleep, so
