@@ -1,0 +1,90 @@
+--- a/host/drivers/transport/sdio/sdio_drv.c
++++ b/host/drivers/transport/sdio/sdio_drv.c
+@@ -227,6 +227,16 @@
+ // sem to trigger sdio_data_to_rx_buf_task()
+ static semaphore_handle_t sem_double_buf_xfer_data;
+ 
++/* Posted by sdio_data_to_rx_buf_task when it releases its buffer, so
++ * sdio_read_task can wait for it instead of dropping a read. */
++static semaphore_handle_t sem_double_buf_free;
++
++/* Bounded wait for the copy task before a read is dropped */
++#define SDIO_RX_BUF_WAIT_MS       20
++#define SDIO_RX_BUF_WAIT_RETRIES  2
++
++static uint32_t sdio_rx_buf_drops;
++
+ static void * sdio_rx_buf_thread;
+ static void sdio_data_to_rx_buf_task(void const* pvParameters);
+ 
+@@ -344,6 +354,10 @@
+ 		g_h.funcs->_h_destroy_semaphore(sem_double_buf_xfer_data);
+ 		sem_double_buf_xfer_data = NULL;
+ 	}
++	if (sem_double_buf_free) {
++		g_h.funcs->_h_destroy_semaphore(sem_double_buf_free);
++		sem_double_buf_free = NULL;
++	}
+ 
+ #if DO_COMBINED_REG_READ
+     if (reg_buf) {
+@@ -1176,6 +1190,8 @@
+ 
+ 		// finished sending data: reset read_index
+ 		double_buf.read_index = -1;
++		// wake sdio_read_task if it waits for this buffer
++		g_h.funcs->_h_post_semaphore(sem_double_buf_free);
+ 	}
+ }
+ 
+@@ -1405,6 +1421,16 @@
+ 		if (unlikely(ret))
+ 			continue;
+ 
++		/* The copy task still owns the other buffer: wait for it rather
++		 * than drop a read already taken from the co-processor. Waiting
++		 * also holds off the next read, so the co-processor keeps later
++		 * packets queued. Drop only if the copy task is stuck. */
++		int waits = SDIO_RX_BUF_WAIT_RETRIES;
++		while (double_buf.read_index >= 0 && waits > 0) {
++			if (g_h.funcs->_h_get_semaphore(sem_double_buf_free, SDIO_RX_BUF_WAIT_MS))
++				waits--;
++		}
++
+ 		if (double_buf.read_index < 0) {
+ 			double_buf.read_index = double_buf.write_index;
+ 			double_buf.read_data_len = len_from_slave;
+@@ -1412,9 +1438,10 @@
+ 			// trigger task to copy data to queue
+ 			g_h.funcs->_h_post_semaphore(sem_double_buf_xfer_data);
+ 		} else {
+-			// error: task to copy data to queue still running
++			// error: task to copy data to queue stalled
+ 			sdio_rx_free_buffer(rxbuff);
+-			ESP_LOGE(TAG, "task still writing Rx data to queue!");
++			ESP_LOGE(TAG, "Rx buffer busy, dropped read #%" PRIu32 " (copy task stalled)",
++				++sdio_rx_buf_drops);
+ 			// don't send data to task, or update write_index
+ 		}
+ 	}
+@@ -1607,6 +1634,10 @@
+ 	assert(sem_double_buf_xfer_data);
+ 	g_h.funcs->_h_get_semaphore(sem_double_buf_xfer_data, 0);
+ 
++	sem_double_buf_free = g_h.funcs->_h_create_semaphore(1);
++	assert(sem_double_buf_free);
++	g_h.funcs->_h_get_semaphore(sem_double_buf_free, 0);
++
+ 	sdio_rx_buf_thread = g_h.funcs->_h_thread_create("sdio_rx_buf",
+ 		DFLT_TASK_PRIO, RX_BUF_TASK_STACK_SIZE, sdio_data_to_rx_buf_task, NULL);
+ 
+@@ -1788,6 +1819,9 @@
+ 		if (sem_double_buf_xfer_data) {
+ 			while (g_h.funcs->_h_get_semaphore(sem_double_buf_xfer_data, 0) == ESP_OK);
+ 		}
++		if (sem_double_buf_free) {
++			while (g_h.funcs->_h_get_semaphore(sem_double_buf_free, 0) == ESP_OK);
++		}
+ 
+ 		res = transport_card_init(bus_handle, CARD_INIT_TIMEOUT_MS);
+ 		if (res) {

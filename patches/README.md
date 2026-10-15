@@ -135,3 +135,21 @@ dequeue can no longer resend a stale handle.
 ```sh
 patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-sdio-tx-coalesce.patch
 ```
+
+`esp-hosted-sdio-rx-wait.patch` makes the SDIO read thread wait for the
+receive copy thread instead of dropping a read. `sdio_read` fills one half
+of a double buffer while `sdio_rx_buf` unpacks the other into the receive
+queue. A read that completed before `sdio_rx_buf` had released its half
+was freed whole, every frame and RPC message in it, with "task still
+writing Rx data to queue!". The read thread now waits for the release, up
+to two 20 ms timeouts, and drops only if the copy thread is stuck; waiting
+also holds off the next read, so the coprocessor keeps later packets
+queued. This backports the bounded wait of the 3.x host driver to 2.x.
+The bridge's thread priorities (`hosted_thread_placement`) already keep
+the overrun rare. With all four SDIO threads at one priority, the overrun
+recurred 7 times in 13 minutes and each waited at most 1.9 ms, with no
+read lost; without the patch, all 5 in 12 minutes were dropped.
+
+```sh
+patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-sdio-rx-wait.patch
+```
