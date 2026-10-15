@@ -1,0 +1,32 @@
+--- a/host/features/eh_host_feat_peer_data/src/eh_host_peer_data.c
++++ b/host/features/eh_host_feat_peer_data/src/eh_host_peer_data.c
+@@ -3,6 +3,8 @@
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <stdint.h>
++#include <inttypes.h>
++#include <stdlib.h>
+ #include <string.h>
+ 
+ #include "esp_err.h"
+@@ -43,9 +45,18 @@
+         .data   = data_copy,
+         .len    = c->u.e_peer_data.len,
+     };
+-    esp_event_post(EH_HOST_EVENT,
++    if (esp_event_post(EH_HOST_EVENT,
+                              (int32_t)EH_HOST_EVENT_PEER_DATA_RX,
+-                             &evt, sizeof(evt), 0);
++                             &evt, sizeof(evt), 0) != ESP_OK) {
++        /* The dispatcher frees the copy of a posted message; a message
++         * the full event queue refused is freed here. */
++        static uint32_t s_peer_data_lost;
++        free(data_copy);
++        if ((s_peer_data_lost++ & 0x3f) == 0) {
++            ESP_LOGW("eh_peer_data", "event queue full, %" PRIu32
++                     " peer data messages lost", s_peer_data_lost);
++        }
++    }
+ }
+ 
+ esp_err_t eh_host_peer_data_send(uint32_t msg_id,

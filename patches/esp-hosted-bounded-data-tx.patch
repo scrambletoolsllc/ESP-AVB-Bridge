@@ -1,17 +1,41 @@
---- a/host/drivers/transport/sdio/sdio_drv.c
-+++ b/host/drivers/transport/sdio/sdio_drv.c
-@@ -1543,7 +1543,13 @@
- 		pkt_stats.sta_tx_in_pass++;
+--- a/host/mcu/eh_host_mcu_transport/src/eh_host_bus_sdio.c
++++ b/host/mcu/eh_host_mcu_transport/src/eh_host_bus_sdio.c
+@@ -2204,7 +2204,15 @@
+         pkt_stats.sta_tx_in_pass++;
  #endif
  
--	g_h.funcs->_h_queue_item(to_slave_queue[pkt_prio], &buf_handle, HOSTED_BLOCK_MAX);
-+	/* Network RX callers must not wait for SDIO data queue capacity. */
-+	bool data_frame = iface_type == ESP_STA_IF || iface_type == ESP_AP_IF;
-+	int timeout = data_frame ? 0 : HOSTED_BLOCK_MAX;
-+	if (g_h.funcs->_h_queue_item(to_slave_queue[pkt_prio], &buf_handle, timeout) != RET_OK) {
-+		H_FREE_PTR_WITH_FUNC(free_func, buffer_to_free);
-+		return data_frame ? ESP_ERR_NO_MEM : ESP_FAIL;
-+	}
- 	g_h.funcs->_h_post_semaphore(sem_to_slave_queue);
+-    eh_host_port_queue_send(to_slave_queue[pkt_prio], buf_handle, EH_HOST_PORT_WAIT_FOREVER);
++    /* Network RX callers must not wait for SDIO data queue capacity. */
++    bool data_frame = buf_handle->if_type == ESP_STA_IF ||
++                      buf_handle->if_type == ESP_AP_IF;
++    if (eh_host_port_queue_send(to_slave_queue[pkt_prio], buf_handle,
++            data_frame ? 0 : EH_HOST_PORT_WAIT_FOREVER) != EH_HOST_PORT_OK) {
++        EH_HOST_PORT_FREE_PTR_WITH_FUNC(buf_handle->free_buf_handle,
++                                       buf_handle->priv_buffer_handle);
++        return data_frame ? ESP_ERR_NO_MEM : ESP_FAIL;
++    }
+     eh_host_port_sem_post(sem_to_slave_queue);
+     return ESP_OK;
+ }
+--- a/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_channels.c
++++ b/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_channels.c
+@@ -60,6 +60,9 @@
+     };
+     eh_frame_encode(buf, &bh, payload_len);
+     int rc = eh_host_mcu_transport_tx(&bh);
++    /* A full data queue is backpressure the caller counts as a drop. */
++    if (rc == ESP_ERR_NO_MEM)
++        return ESP_ERR_NO_MEM;
+     return (rc >= 0) ? ESP_OK : ESP_FAIL;
+ }
  
+@@ -94,6 +97,9 @@
+     };
+     eh_frame_encode(frame_start, &bh, payload_len);
+     int rc = eh_host_mcu_transport_tx(&bh);
++    /* A full data queue is backpressure the caller counts as a drop. */
++    if (rc == ESP_ERR_NO_MEM)
++        return ESP_ERR_NO_MEM;
+     return (rc >= 0) ? ESP_OK : ESP_FAIL;
+ }
  

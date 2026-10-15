@@ -1,155 +1,74 @@
 # Local ESP-Hosted fixes
 
-`esp-hosted-station-list-null-response.patch` fixes a NULL dereference in
-`rpc_wifi_ap_get_sta_list` when a synchronous RPC has no response. The
-wrapper already guards the station array copy, but copied the count
-outside that guard. A failed query now returns zero stations and retains
-the original RPC error return.
+The host (`main/`) and the coprocessor (`coprocessor/`) both build on the
+`espressif/esp_hosted` 3.0.9 component. Three patches apply to the host's
+copy in `managed_components/espressif__esp_hosted`, in the order below,
+and one to the coprocessor's copy in
+`coprocessor/managed_components/espressif__esp_hosted`. Managed
+dependencies are ignored by Git; reapply these patches when regenerating
+them.
 
-Observed on the loaded bridge on 2026-09-25 at 07:50 UTC, in the Announce
-publisher task. The missing RPC response itself remains under investigation.
+The 2.x patches for the station list NULL response, concurrent
+synchronous RPC, the AP event MAC, the SDIO receive wait, SDIO transmit
+coalescing and the association lifecycle hooks are gone: 3.x fixes the
+first four, aggregates SDIO frames in both directions itself, and
+esp_hosted_avb follows associations through the 3.x coprocessor's Wi-Fi
+events.
 
-Apply from the repository root after installing managed dependencies:
+`esp-hosted-thread-placement-queue-space.patch` adds two host-side hooks
+for a bridge that forwards a stream. A weak `hosted_thread_placement`
+lets the application set each hosted thread's priority and core by name,
+and `esp_hosted_data_tx_queue_space` reports the free entries in the data
+queue to the coprocessor. Unpinned, the SDIO threads preempted `emac_rx`
+on its own core at every hand-off, and an 8000 frame/s Class B stream
+overflowed the EMAC RX ring and cost the bridge gPTP, MSRP and the beacon
+refresh. The bridge moves the hosted threads to core 1, runs `sdio_read`
+below `sdio_rx_buf` and `sdio_process_rx`, gives the RPC threads back the
+priority they had in 2.x, and keeps four queue entries for control
+frames.
+
+The patch also fixes a write after free in `eh_host_port_task_create`.
+The task handle was stored through the task's own wrapper, which a
+detached task frees when it returns, and with PSRAM stacks the create
+call stores the handle only after the new task has run. Once
+`sdio_process_rx` ran below the default priority, the `eh_auto_init` task
+it spawns finished first on every boot, and the handle write corrupted
+the heap.
 
 ```sh
-patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-station-list-null-response.patch
-python3 tools/hosted_rpc/test_station_list.py
-```
-
-The regression test compiles the actual installed wrapper with stubbed RPC
-responses and ASan/UBSan. Managed dependencies are ignored by Git; retain
-this patch when regenerating them.
-
-`esp-hosted-concurrent-sync-rpc.patch` replaces the shared synchronous
-response FIFO with a response slot keyed by request UID. UID allocation,
-slot publication, reply delivery and retirement use a short critical
-section. Waiting and memory allocation/deletion happen outside it. This
-prevents concurrent callers from claiming the same slot or consuming each
-other's reply. Late/duplicate replies are rejected, and transmit-failure
-responses retain the originating UID.
-
-The loaded bridge had both an unmatched station-list response and a NULL
-semaphore deletion assertion. The slot helpers pass native tests with
-reverse-order replies, 40,000 concurrent requests and 1,000 timeout/reply
-races under ASan/UBSan. Hardware validation is recorded in project.md.
-This patch targets the ESP FreeRTOS host; it does not redesign the separate
-asynchronous callback table or concurrent RPC-library shutdown.
-
-```sh
-patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-concurrent-sync-rpc.patch
-python3 tools/hosted_rpc/test_sync_routing.py
+patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-thread-placement-queue-space.patch
 ```
 
 `esp-hosted-bounded-data-tx.patch` makes AP/STA SDIO data queue insertion
-nonblocking. A full queue returns `ESP_ERR_NO_MEM` and releases the supplied
-transport buffer once; only successful insertion wakes the transmitter.
-Control/RPC traffic retains its wait policy, with failed insertion now handled.
-This prevents a synchronous network RX caller from waiting indefinitely for
-radio queue capacity. It does not guarantee lossless audio or reserve bandwidth
-for Signaling. Queue saturation remains an explicit data loss condition.
+nonblocking. A full queue returns `ESP_ERR_NO_MEM`, which the transport
+channel now passes up instead of `ESP_FAIL`, and releases the transport
+buffer once. Control/RPC traffic keeps its wait. This prevents a
+synchronous network RX caller from waiting indefinitely for radio queue
+capacity, and esp_avb counts the refused frames as backpressure drops.
 
 ```sh
 patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-bounded-data-tx.patch
 python3 tools/hosted_rpc/test_data_tx.py
 ```
 
-The test compiles the installed SDIO function and release macro, checks both
-buffer modes, ownership, failures, priorities and control timeout policy under
-ASan/UBSan. Hardware results are recorded in project.md.
-
-`esp-hosted-ap-event-mac.patch` replaces `strlen` on the six-byte binary
-station MAC in AP association/disassociation event forwarding. The bounded
-check accepts valid zero-leading MACs and does not read past the address.
-All-zero placeholders remain ignored.
+`esp-hosted-peer-data-event-loss.patch` frees a received peer data
+message that the default event loop refused. 3.x posts each one to that
+loop without waiting and leaked the copy when the queue was full; the
+patch also counts the loss, which costs esp_hosted_avb and the FTM probe
+a message.
 
 ```sh
-patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-ap-event-mac.patch
-python3 tools/hosted_rpc/test_ap_event_mac.py
+patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-peer-data-event-loss.patch
 ```
 
-`esp-hosted-association-lifecycle.patch` applies to the separate
-`esp-hosted-mcu` coprocessor tree. It returns the actual enqueue result from
-`send_event_data_to_host` and adds optional begin/complete hooks around AP
-join, leave and stop notification forwarding. esp_hosted_avb implements these
-hooks: it keeps the access point's association list and sends it to the host
-after each notification, and the host's gPTP sends a station Announce and
-Signaling only once its peers match that list. The FTM probe follows the same
-list to retire snapshots. A successful enqueue is not proof of host event
-processing.
+`esp-hosted-bounded-data-rx.patch` applies to the coprocessor. The AP's
+receive callback runs on the coprocessor's Wi-Fi task and hands each frame
+to `sdio_write`, which waited without limit for room in the queue to the
+host. Once a station's uplink outran the host, the Wi-Fi task blocked and
+the AP stopped beaconing. A data frame that finds the queue full is now
+dropped and counted, with a summary at most every 10 s; control and
+events have their own queues in 3.x.
 
 ```sh
-patch -d ../esp-hosted-mcu -p1 < patches/esp-hosted-association-lifecycle.patch
-python3 tools/ftm_association/test_lifecycle_hook.py
-```
-
-Without this patch the coprocessor does not report association changes, and
-the host serves stations from its own association events.
-
-`esp-hosted-thread-placement-queue-space.patch` adds two host-side hooks
-for a bridge that forwards a stream. A weak `hosted_thread_placement`
-lets the application set each hosted thread's priority and core by name,
-and `esp_hosted_data_tx_queue_space` reports the free entries in the data
-queue to the coprocessor. Unpinned, the SDIO writer (priority 23)
-preempted `emac_rx` on its own core at every hand-off and the RPC threads
-time-sliced with it, so an 8000 frame/s Class B stream overflowed the EMAC
-RX ring and cost the bridge gPTP, MSRP and the beacon refresh. The bridge
-moves the hosted threads to core 1 and keeps four queue entries for
-control frames. Measured on the bench, EMAC RX overflows under that stream
-fell from about 560 a second to none, with no Pdelay loss.
-
-```sh
-patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-thread-placement-queue-space.patch
-```
-
-`esp-hosted-bounded-data-rx.patch` applies to the `esp-hosted-mcu`
-coprocessor tree. The AP's receive callback runs on the coprocessor's Wi-Fi
-task and hands each frame to `sdio_write`, which waited without limit for an
-SDIO send slot and logged every failed buffer allocation at error level. Once
-a station's uplink outran the host, the Wi-Fi task blocked or spent its time
-on console output, so the AP stopped beaconing and never recovered. A data
-frame now takes a send slot only without waiting and only while more than two
-remain, which keeps a slot for RPC and event traffic; otherwise it is dropped
-and counted, with a summary at most every 10 s. The mempool's allocation
-failure log is rate limited. Measured on the bench with a 4000 frame/s
-station talker behind a 32-frame Block Ack window: the AP stays up and the
-coprocessor drops under 0.1 % of uplink frames over a 90 s run.
-
-```sh
-patch -d ../esp-hosted-mcu -p1 < patches/esp-hosted-bounded-data-rx.patch
-```
-
-`esp-hosted-sdio-tx-coalesce.patch` sends the data frames queued behind
-the current one in the same SDIO write, each in its own 1536-byte receive
-buffer on the coprocessor, up to four per write. Measured on the bridge,
-every host write to the coprocessor's receive FIFO costs about 600 µs
-whatever its size, plus about 50 µs per 512-byte block; reads and register
-writes do not pay it, and it does not change with the bus clock, so it
-sits in the coprocessor's receive path. One write per frame capped the
-Wi-Fi downlink at about 900 frames a second of 1.3 KB. With four frames to
-a write the bridge carried an 8-channel Class B stream, 3700 frames a
-second, with queue drops falling from 860 to 15 a second. The coprocessor
-reads each buffer as a packet of its own and needs no change. The patch
-also resets the write task's per-frame state each pass, so an empty
-dequeue can no longer resend a stale handle.
-
-```sh
-patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-sdio-tx-coalesce.patch
-```
-
-`esp-hosted-sdio-rx-wait.patch` makes the SDIO read thread wait for the
-receive copy thread instead of dropping a read. `sdio_read` fills one half
-of a double buffer while `sdio_rx_buf` unpacks the other into the receive
-queue. A read that completed before `sdio_rx_buf` had released its half
-was freed whole, every frame and RPC message in it, with "task still
-writing Rx data to queue!". The read thread now waits for the release, up
-to two 20 ms timeouts, and drops only if the copy thread is stuck; waiting
-also holds off the next read, so the coprocessor keeps later packets
-queued. This backports the bounded wait of the 3.x host driver to 2.x.
-The bridge's thread priorities (`hosted_thread_placement`) already keep
-the overrun rare. With all four SDIO threads at one priority, the overrun
-recurred 7 times in 13 minutes and each waited at most 1.9 ms, with no
-read lost; without the patch, all 5 in 12 minutes were dropped.
-
-```sh
-patch -d managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-sdio-rx-wait.patch
+patch -d coprocessor/managed_components/espressif__esp_hosted -p1 < patches/esp-hosted-bounded-data-rx.patch
 ```

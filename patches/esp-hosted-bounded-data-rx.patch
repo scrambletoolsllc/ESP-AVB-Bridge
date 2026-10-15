@@ -1,28 +1,24 @@
---- a/slave/main/sdio_slave_api.c
-+++ b/slave/main/sdio_slave_api.c
-@@ -9,6 +9,8 @@
- #include <string.h>
- #include <unistd.h>
+--- a/coprocessor/eh_cp_transport/src/eh_cp_transport_sdio.c
++++ b/coprocessor/eh_cp_transport/src/eh_cp_transport_sdio.c
+@@ -12,6 +12,7 @@
+ #include "freertos/semphr.h"
  #include "esp_log.h"
-+#include "esp_system.h"
+ #include "esp_system.h"
 +#include "esp_timer.h"
- #include "esp_hosted_log.h"
- #include "interface.h"
- #include "sdio_slave_api.h"
-@@ -521,6 +523,38 @@
- 	return ESP_OK;
- }
+ #include "esp_heap_caps.h"
+ #include "eh_log.h"
+ #include "eh_transport_cp.h"
+@@ -495,6 +496,34 @@
  
-+#if !SIMPLIFIED_SDIO_SLAVE
+ #endif
+ 
 +/* Data frames never wait for the host. The AP's receive callback calls
-+ * sdio_write on the Wi-Fi task, so waiting for a send slot stalls the
++ * sdio_write on the Wi-Fi task, so waiting for queue space stalls the
 + * whole AP (beacons, block acks) whenever the host falls behind, and a
 + * console line per dropped frame stalls it the same way. A data frame
-+ * takes a slot only while more than SDIO_CONTROL_RESERVE remain, which
-+ * keeps one free for RPC and event traffic; past that it is dropped and
-+ * counted. */
-+#define SDIO_CONTROL_RESERVE        2
-+#define SDIO_DROP_REPORT_US         10000000
++ * that finds the queue full is dropped and counted; control and events
++ * have their own queues. */
++#define SDIO_DROP_REPORT_US 10000000
 +
 +static uint32_t sdio_data_sent;
 +static uint32_t sdio_data_dropped;
@@ -43,80 +39,24 @@
 +	sdio_data_sent = 0;
 +	sdio_drop_report_at_us = now_us + SDIO_DROP_REPORT_US;
 +}
-+#endif
 +
+ /* if_ops->write: enqueue only. Ownership of buf_handle transfers to the queue;
+  * the send_task frees it after packing. */
  static int32_t sdio_write(interface_handle_t *handle, interface_buffer_handle_t *buf_handle)
- {
- 	uint32_t total_len = 0;
-@@ -550,8 +584,26 @@
+@@ -535,10 +564,15 @@
+ 	prio = (q.if_type == ESP_SERIAL_IF) ? PRIO_Q_SERIAL :
+ 	       (q.if_type == ESP_HCI_IF)    ? PRIO_Q_BT : PRIO_Q_OTHERS;
  
- 	total_len = buf_handle->payload_len + offset;
- 
-+#if !SIMPLIFIED_SDIO_SLAVE
-+	bool is_data = buf_handle->if_type == ESP_STA_IF ||
-+		buf_handle->if_type == ESP_AP_IF;
-+	if (is_data &&
-+	    (uxSemaphoreGetCount(sdio_send_queue_sem) <= SDIO_CONTROL_RESERVE ||
-+	     xSemaphoreTake(sdio_send_queue_sem, 0) != pdTRUE)) {
-+		sdio_note_data_drop();
-+		return ESP_FAIL;
-+	}
-+#endif
-+
- 	sendbuf = sdio_buffer_tx_alloc(total_len, MEMSET_REQUIRED);
- 	if (sendbuf == NULL) {
-+#if !SIMPLIFIED_SDIO_SLAVE
-+		if (is_data) {
-+			xSemaphoreGive(sdio_send_queue_sem);
+-	if (xQueueSend(to_host_queue[prio], &q, portMAX_DELAY) != pdTRUE) {
++	bool is_data = prio == PRIO_Q_OTHERS;
++	if (xQueueSend(to_host_queue[prio], &q, is_data ? 0 : portMAX_DELAY) != pdTRUE) {
+ 		free_tx_buf(&q);
++		if (is_data)
 +			sdio_note_data_drop();
-+			return ESP_FAIL;
-+		}
-+#endif
- 		ESP_LOGE(TAG, "send buffer[%"PRIu32"] malloc fail", total_len);
  		return ESP_FAIL;
  	}
-@@ -562,7 +614,7 @@
- 	ESP_HEXLOGV("bus_tx", sendbuf, total_len, 32);
- 
- #if !SIMPLIFIED_SDIO_SLAVE
--	if (xSemaphoreTake(sdio_send_queue_sem, portMAX_DELAY) != pdTRUE) {
-+	if (!is_data && xSemaphoreTake(sdio_send_queue_sem, portMAX_DELAY) != pdTRUE) {
- 		sdio_buffer_tx_free(sendbuf);
- 		return ESP_FAIL;
- 	}
-@@ -581,6 +633,10 @@
- 
- #if SIMPLIFIED_SDIO_SLAVE
- 	sdio_buffer_tx_free(sendbuf);
-+#else
-+	if (is_data) {
++	if (is_data)
 +		sdio_data_sent++;
-+	}
- #endif
- 
- #if ESP_PKT_STATS
---- a/common/mempool/mempool.c
-+++ b/common/mempool/mempool.c
-@@ -4,6 +4,7 @@
-  * SPDX-License-Identifier: Apache-2.0
-  */
- 
-+#include <inttypes.h>
- #include "esp_log.h"
- #include "sdkconfig.h"
- #include "mempool.h"
-@@ -177,7 +178,13 @@
- 		mempool->memset(mem, 0, nbytes);
- 
- 	if (!mem) {
--		ESP_LOGE(TAG, "mempool %p alloc failed nbytes[%u]", mempool, nbytes);
-+		/* Rate-limited: a caller that drops on failure can fail at its
-+		 * packet rate, and a console line per failure stalls it. */
-+		static uint32_t alloc_failures;
-+		if ((alloc_failures++ & 0xFF) == 0) {
-+			ESP_LOGE(TAG, "mempool %p alloc failed nbytes[%u] (%" PRIu32 " failures)",
-+					mempool, nbytes, alloc_failures);
-+		}
- 	}
- 	return mem;
+ 	send_task_notify();
+ 	return buf_handle->payload_len;
  }
