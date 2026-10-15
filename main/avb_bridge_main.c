@@ -89,6 +89,9 @@ static void on_ap_sta_disconnected(void *arg, esp_event_base_t base,
 }
 
 /* SoftAP defaults. Open auth for now. */
+/* esp-hosted 3.x delivers frames from the AP only to the netif with the
+ * default AP key, so the bridge port keeps that key. */
+#define AVB_AP_IF_KEY "WIFI_AP_DEF"
 #define AVB_AP_SSID "ESP-AVB-Bridge"
 #define AVB_AP_CHANNEL 6
 #define AVB_AP_MAX_CONN 4
@@ -241,13 +244,13 @@ static void disable_ap_11b_rates(void) {
   } while (0)
 static esp_err_t init_wifi_softap(void) {
   /* AP netif is an L2 bridge member — no L3, so ESP_NETIF_FLAG_AUTOUP
-   * keeps it up regardless. if_key="WIFI_0" must match the value
-   * passed via avb_config.wifi_interface so port[1] binds here. */
+   * keeps it up regardless. if_key must match the value passed via
+   * avb_config.wifi_interface so port[1] binds here. */
   esp_netif_inherent_config_t ap_inherent =
       ESP_NETIF_INHERENT_DEFAULT_WIFI_AP();
   ap_inherent.flags = ESP_NETIF_FLAG_AUTOUP;
   ap_inherent.ip_info = NULL;
-  ap_inherent.if_key = "WIFI_0";
+  ap_inherent.if_key = AVB_AP_IF_KEY;
   ap_inherent.if_desc = "wifi0";
   s_wifi_ap_netif = esp_netif_create_wifi(WIFI_IF_AP, &ap_inherent);
   WIFI_CHECK(esp_wifi_set_default_wifi_ap_handlers(),
@@ -421,7 +424,7 @@ void app_main(void) {
 
   /* Wi-Fi port: Sync transport is the beacon Vendor IE; peer-delay is
    * FTM-driven (responder side, no measurement). */
-  ptpd_start_port(1, "WIFI_0", ptp_port_medium_wifi_ftm);
+  ptpd_start_port(1, AVB_AP_IF_KEY, ptp_port_medium_wifi_ftm);
   if (ftm_clock_probe_transport_ready) ftm_clock_probe_transport_ready();
 
   /* Bridge role: port 0 = Ethernet (EMAC), port 1 = Wi-Fi AP. */
@@ -429,7 +432,7 @@ void app_main(void) {
   avb_config.entity_name = "AVB Bridge";
   avb_config.eth_handle = s_eth_handle;
   avb_config.eth_interface = "ETH_0";
-  avb_config.wifi_interface = "WIFI_0";
+  avb_config.wifi_interface = AVB_AP_IF_KEY;
 
   bool enable = true;
   if (esp_eth_ioctl(s_eth_handle, ETH_CMD_S_PROMISCUOUS, &enable) != ESP_OK) {
