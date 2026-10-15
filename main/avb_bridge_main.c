@@ -108,13 +108,15 @@ static void on_ap_sta_disconnected(void *arg, esp_event_base_t base,
  * time-sliced with it, so a Class B stream overflowed the EMAC RX ring and
  * starved gPTP, MSRP and the beacon refresh. The hosted threads run on
  * core 1, the SDIO ones below PTPD and AVB-BR there, and emac_rx keeps
- * core 0. On receive, sdio_read fills one half of a double buffer while
- * sdio_rx_buf unpacks the other into the queue sdio_process_rx drains,
- * and a read that completes before sdio_rx_buf has finished is dropped
- * whole. At one priority sdio_read got the core whenever the other two
- * were preempted (FreeRTOS resumes the next thread of equal priority)
- * or sdio_rx_buf waited on a full queue, about 40 reads an hour, so it
- * runs one level below both. */
+ * core 0. On receive, sdio_read fills one staging buffer while
+ * sdio_rx_buf unpacks another into the queue sdio_process_rx drains. At
+ * one priority sdio_read got the core whenever the other two were
+ * preempted (FreeRTOS resumes the next thread of equal priority) or
+ * sdio_rx_buf waited on a full queue, and ran out of free buffers; 2.x
+ * dropped those reads, about 40 an hour, 3.x waits for a buffer. So it
+ * runs one level below both. esp-hosted 3.x starts its RPC threads at
+ * priority 5, below the bridge's own work; they get back the 23 they
+ * had in 2.x. */
 void hosted_thread_placement(const char *tname, uint32_t *tprio,
                              BaseType_t *core_id) {
   if (strcmp(tname, "sdio_rx_buf") == 0 ||
@@ -124,7 +126,8 @@ void hosted_thread_placement(const char *tname, uint32_t *tprio,
   } else if (strncmp(tname, "sdio_", 5) == 0) {
     *tprio = 20;
     *core_id = 1;
-  } else if (strncmp(tname, "rpc_", 4) == 0) {
+  } else if (strncmp(tname, "eh_rpc_", 7) == 0) {
+    *tprio = 23;
     *core_id = 1;
   }
 }
