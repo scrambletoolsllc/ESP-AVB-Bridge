@@ -55,11 +55,7 @@ extern int ptpd_now(struct timespec *timestamp);
 #endif
 #endif
 
-extern esp_err_t esp_hosted_send_custom_data(uint32_t message_id,
-                                            const uint8_t *data, size_t length);
-extern esp_err_t esp_hosted_register_custom_callback(
-    uint32_t message_id,
-    void (*callback)(uint32_t, const uint8_t *, size_t, void *), void *context);
+#include "hosted_avb_peer.h"
 
 #define PROBE_REQUEST_ID 0x434c4b01U
 #define PROBE_RESPONSE_ID 0x434c4b02U
@@ -303,7 +299,7 @@ static void receive_arm(uint32_t message_id, const uint8_t *data,
     (void)host_changed;
 #endif
     acknowledgment.coprocessor_boot = boot_id;
-    esp_hosted_send_custom_data(PROBE_ARM_ACK_ID,
+    hosted_avb_peer_send(PROBE_ARM_ACK_ID,
         (const uint8_t *)&acknowledgment, sizeof(acknowledgment));
 }
 #endif
@@ -546,7 +542,7 @@ static void receive_request(uint32_t message_id, const uint8_t *data,
     if (!(response.request.sequence % 5))
         ESP_LOGI(TAG, "FTMTX,%" PRIu32 ",%" PRIu32, tx_valid_frames, tx_invalid_frames);
 #endif
-    esp_err_t result = esp_hosted_send_custom_data(
+    esp_err_t result = hosted_avb_peer_send(
         PROBE_RESPONSE_ID, (const uint8_t *)&response, sizeof(response));
     if (result != ESP_OK)
         ESP_LOGW(TAG, "response failed: %s", esp_err_to_name(result));
@@ -594,9 +590,9 @@ static void probe_task(void *context)
     esp_log_level_set("ptp", ESP_LOG_WARN);
 #if CONFIG_FTM_CLOCK_PROBE_EDGE
     initialize_edge_capture();
-    ESP_ERROR_CHECK(esp_hosted_register_custom_callback(PROBE_ARM_ID, receive_arm, NULL));
+    ESP_ERROR_CHECK(hosted_avb_peer_register(PROBE_ARM_ID, receive_arm, NULL));
 #endif
-    ESP_ERROR_CHECK(esp_hosted_register_custom_callback(
+    ESP_ERROR_CHECK(hosted_avb_peer_register(
         PROBE_REQUEST_ID, receive_request, NULL));
     ESP_LOGI(TAG, "C6 mapping probe ready boot=%" PRIu32, boot_id);
     while (true) {
@@ -657,7 +653,7 @@ static void publish_associations(const ptp_timing_snapshot_t *source)
     }
     uint8_t wire[FTM_ASSOC_ADMISSION_SIZE];
     if (ftm_radio_association_encode(snapshot.radio_generation, &packet, wire, sizeof(wire)))
-        (void)esp_hosted_send_custom_data(PROBE_TRANSFER_ID, wire, sizeof(wire));
+        (void)hosted_avb_peer_send(PROBE_TRANSFER_ID, wire, sizeof(wire));
 }
 
 static void publish_timing(void)
@@ -689,7 +685,7 @@ static void publish_timing(void)
         transfer.source_port[9] = 2;
         memcpy(transfer.btc_identity, source.btc_identity, 8);
     }
-    esp_err_t result = esp_hosted_send_custom_data(PROBE_TRANSFER_ID,
+    esp_err_t result = hosted_avb_peer_send(PROBE_TRANSFER_ID,
         (const uint8_t *)&transfer, sizeof(transfer));
     if (result != ESP_OK) ESP_LOGW(TAG, "timing publication failed: %s", esp_err_to_name(result));
 }
@@ -770,8 +766,8 @@ static bool arm_edge(void)
         .sequence = ++host_edge_sequence};
     if (!request.sequence) return false;
     xQueueReset(arm_acknowledgments);
-    if (esp_hosted_send_custom_data(PROBE_ARM_ID, (const uint8_t *)&request,
-                                    sizeof(request)) != ESP_OK) return false;
+    if (hosted_avb_peer_send(PROBE_ARM_ID, (const uint8_t *)&request,
+                             sizeof(request)) != ESP_OK) return false;
     probe_arm_t acknowledgment;
     if (xQueueReceive(arm_acknowledgments, &acknowledgment, pdMS_TO_TICKS(1000)) != pdTRUE ||
         acknowledgment.sequence != request.sequence || !acknowledgment.accepted ||
@@ -1063,7 +1059,7 @@ static void probe_task(void *context)
         vTaskDelete(NULL);
         return;
     }
-    ESP_ERROR_CHECK(esp_hosted_register_custom_callback(
+    ESP_ERROR_CHECK(hosted_avb_peer_register(
         PROBE_RESPONSE_ID, receive_response, NULL));
 #if CONFIG_FTM_CLOCK_PROBE_EDGE
     initialize_host_capture();
@@ -1072,7 +1068,7 @@ static void probe_task(void *context)
 #endif
     arm_acknowledgments = xQueueCreate(4, sizeof(probe_arm_t));
     if (!arm_acknowledgments) { vTaskDelete(NULL); return; }
-    ESP_ERROR_CHECK(esp_hosted_register_custom_callback(PROBE_ARM_ACK_ID, receive_arm_ack, NULL));
+    ESP_ERROR_CHECK(hosted_avb_peer_register(PROBE_ARM_ACK_ID, receive_arm_ack, NULL));
 #endif
     ESP_LOGI(TAG, "columns: host_boot,cp_boot,sequence,host_before_us,host_ptp_ns,"
         "host_after_us,cp_receive_us,mac_before_us,mac_us,mac_after_us,"
@@ -1116,7 +1112,7 @@ static void probe_task(void *context)
         bool valid = sample_ptp(&request.host_ptp_ns);
         request.host_after_us = esp_timer_get_time();
         if (valid) {
-            esp_err_t result = esp_hosted_send_custom_data(
+            esp_err_t result = hosted_avb_peer_send(
                 PROBE_REQUEST_ID, (const uint8_t *)&request, sizeof(request));
             if (result != ESP_OK)
                 ESP_LOGW(TAG, "request failed: %s", esp_err_to_name(result));
