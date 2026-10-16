@@ -50,6 +50,11 @@ CONFIG_ESP_WIFI_TX_BA_WIN=64
 # More dynamic TX buffers so the aggregator has room to accumulate
 # before the BA window forces a send.
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+# Discard a host frame at once when the TX buffer pool is full. The
+# default waits 1 ms up to 16 times per frame while every host frame
+# behind it waits too, which stalled the bus and the bridge's control
+# frames whenever poor air kept the pool full.
+CONFIG_ESP_HOSTED_CP_WIFI_TX_RETRY_LIMIT=1
 # Match RX BA window to TX. Block-Ack negotiation locks the lower of
 # the two endpoints' BA windows; without bumping the RX side too the
 # AP's TX_BA_WIN=64 collapses to the peer's RX_BA_WIN=6 default.
