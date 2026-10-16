@@ -496,12 +496,16 @@ void app_main(void) {
     uint32_t bundles_tx = 0, bundle_frames_tx = 0, bundles_rx = 0,
              bundle_frames_rx = 0;
     uint32_t retx_nacks = 0, retx_sent = 0, retx_stale = 0;
+    uint32_t retx_req = 0, retx_late = 0, retx_spaced = 0, retx_evicted = 0,
+             retx_no_slot = 0, retx_no_room = 0, retx_tx_fail = 0;
     uint32_t in_lost = 0, in_late = 0, in_bypass = 0, split_fail = 0;
     uint32_t pace_no_tspec = 0, pace_no_entry = 0;
     avb_bridge_pacer_bypass_stats(&pace_no_tspec, &pace_no_entry);
 #ifdef CONFIG_ESP_AVB_WIFI_BUNDLE
     avb_bridge_forward_stats_bundles(&bundles_tx, &bundle_frames_tx);
     avb_bridge_retx_stats(&retx_nacks, &retx_sent, &retx_stale);
+    avb_bridge_retx_detail(&retx_req, &retx_late, &retx_spaced, &retx_evicted,
+                           &retx_no_slot, &retx_no_room, &retx_tx_fail);
     avb_bridge_bundle_ingress_stats(&in_lost, &in_late, &in_bypass);
 #endif
     avb_wifi_bundle_rx_stats(&bundles_rx, &bundle_frames_rx, &split_fail);
@@ -519,7 +523,8 @@ void app_main(void) {
 #endif
              "paced=%lu/%lu depth=%lu bypass=%lu/%lu  bundles tx=%lu/%lu rx=%lu/%lu  "
              "ingress lost=%lu late=%lu bypass=%lu split_fail=%lu  "
-             "retx nack=%lu sent=%lu stale=%lu  "
+             "retx nack=%lu req=%lu sent=%lu late=%lu spaced=%lu evicted=%lu "
+             "noslot=%lu noroom=%lu txfail=%lu  "
              "uplink nack=%lu rec=%lu gaveup=%lu dup=%lu  "
              "acmp=%lu  oom=%lu  STA=%u  iram_free=%u/%u",
              (unsigned long)eth_ok, (unsigned long)eth_fail,
@@ -537,7 +542,10 @@ void app_main(void) {
              (unsigned long)bundle_frames_rx, (unsigned long)in_lost,
              (unsigned long)in_late, (unsigned long)in_bypass,
              (unsigned long)split_fail, (unsigned long)retx_nacks,
-             (unsigned long)retx_sent, (unsigned long)retx_stale,
+             (unsigned long)retx_req, (unsigned long)retx_sent,
+             (unsigned long)retx_late, (unsigned long)retx_spaced,
+             (unsigned long)retx_evicted, (unsigned long)retx_no_slot,
+             (unsigned long)retx_no_room, (unsigned long)retx_tx_fail,
              (unsigned long)up_nacks, (unsigned long)up_rec,
              (unsigned long)up_gaveup, (unsigned long)up_dup,
              (unsigned long)avb_bridge_forward_stats_acmp_copies(),
