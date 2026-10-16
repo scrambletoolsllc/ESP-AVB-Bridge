@@ -95,6 +95,13 @@ CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
 CONFIG_ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4=y
 CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
 
+# esp-hosted waits for coprocessor buffer credit in 1 ms task delays. At
+# a 100 Hz tick each delay is a bare yield, so its 12 ms data and 200 ms
+# control waits ended in under 1 ms and dropped the whole aggregate. At
+# 1000 Hz, credit stalls in a two-way 8-channel test fell from about
+# 100 to 9 a minute and no control message was dropped.
+CONFIG_FREERTOS_HZ=1000
+
 # Peer data transfer / Custom RPC. ESP-Hosted's RPC catalogue does not
 # expose the coprocessor-only Wi-Fi calls the bridge needs (vendor IE,
 # association list, 802.11b rates). esp_hosted_avb carries them on this
