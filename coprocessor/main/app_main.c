@@ -8,6 +8,8 @@
  */
 
 #include "sdkconfig.h"
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
 
@@ -97,7 +99,21 @@ static void enable_tx_stats(void *context, esp_event_base_t base, int32_t id,
 }
 #endif
 
+/* Console writes go through the UART driver, so a log call copies into
+ * the TX buffer and returns instead of spinning until the port sends it.
+ * Its RPC task shares a priority with the task that moves host frames to
+ * the radio, and each clock probe line held it for 4 to 9 ms. */
+static void console_use_driver(void) {
+#if CONFIG_ESP_CONSOLE_UART
+  if (uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM,
+                          2 * UART_HW_FIFO_LEN(CONFIG_ESP_CONSOLE_UART_NUM),
+                          4096, 0, NULL, 0) == ESP_OK)
+    uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+#endif
+}
+
 void app_main(void) {
+  console_use_driver();
   esp_err_t result = nvs_flash_init();
   if (result == ESP_ERR_NVS_NO_FREE_PAGES ||
       result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
