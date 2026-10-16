@@ -26,6 +26,8 @@
 #include "esp_avb.h"
 #include "esp_eth_clock.h"
 #include <driver/gpio.h>
+#include <driver/uart.h>
+#include <driver/uart_vfs.h>
 #include <esp_check.h>
 #include <esp_eth.h>
 #include <esp_eth_phy_ip101.h>
@@ -377,7 +379,24 @@ static void heap_census_task(void *arg) {
   }
 }
 
+/* Console writes go through the UART driver: a log call copies into the
+ * TX buffer and returns while an interrupt feeds the port. Without the
+ * driver the caller spins until the last character is out, about 40 ms
+ * for a heartbeat line at 115200 baud, and every task below it on that
+ * core waits. */
+#define CONSOLE_TX_BUFFER_BYTES 8192
+
+static void console_use_driver(void) {
+#if CONFIG_ESP_CONSOLE_UART
+  if (uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM,
+                          2 * UART_HW_FIFO_LEN(CONFIG_ESP_CONSOLE_UART_NUM),
+                          CONSOLE_TX_BUFFER_BYTES, 0, NULL, 0) == ESP_OK)
+    uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+#endif
+}
+
 void app_main(void) {
+  console_use_driver();
   xTaskCreate(heap_census_task, "heap_census", 4096, NULL, 3, NULL);
 #ifdef CONFIG_AVB_BRIDGE_PERF_TEST_MODE
   /* Perf-test mode bypasses every production subsystem. Brings up
