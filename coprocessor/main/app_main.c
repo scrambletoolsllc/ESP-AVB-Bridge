@@ -60,8 +60,32 @@ static uint32_t take_count(volatile uint32_t *count) {
 static esp_test_tx_statistics_t tx_stats;
 static esp_test_tx_fail_statistics_t tx_fail[TEST_TX_FAIL_MAX];
 
-/* Logs the best effort category, which carries the audio, every interval
- * and clears it, so each line covers one interval. */
+/* Logs one access category's statistics and clears them, so each line
+ * covers one interval. */
+static void log_tx_stats(esp_wifi_aci_t aci, const char *name, uint32_t calls,
+                         uint32_t no_mem, uint32_t run_max) {
+  if (esp_wifi_get_tx_statistics(aci, &tx_stats, tx_fail) != ESP_OK)
+    return;
+  esp_wifi_clr_tx_statistics(aci);
+  uint32_t attempts =
+      tx_stats.tb_times + (tx_stats.tx_enable - tx_stats.tb_last);
+  uint32_t failures = 0;
+  for (int state = TEST_TX_FAIL_RTS; state < TEST_TX_FAIL_MAX; state++)
+    failures += tx_fail[state].count;
+  ESP_LOGI(TAG,
+           "%s ppdu=%" PRIu32 " ok=%" PRIu32 " ack=%" PRIu32 " ba=%" PRIu32
+           " retry=%" PRIu32 " fail=%" PRIu32 " coll=%" PRIu32
+           " tmo=%" PRIu32 " nomem=%" PRIu32 " rtt=%" PRIu32 "/%" PRIu32
+           "/%" PRIu32 "us host=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+           name, attempts, tx_stats.tx_succ, tx_stats.rx_ack, tx_stats.rx_ba,
+           tx_stats.retry_edca, failures, tx_stats.collision, tx_stats.timeout,
+           tx_stats.tx_no_mem, attempts ? tx_stats.tx_tot_rtt / attempts : 0,
+           tx_stats.tx_max_rtt, tx_stats.tx_seq_max_rtt, calls, no_mem,
+           run_max);
+}
+
+/* Logs the best effort and video categories, which carry the audio, every
+ * interval. The host frame counts cover both and go on the first line. */
 static void tx_stats_task(void *context) {
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(TX_STATS_INTERVAL_MS));
@@ -70,32 +94,15 @@ static void tx_stats_task(void *context) {
     uint32_t run_max = take_count(&no_mem_run_max);
     if (!(esp_wifi_get_tx_statistics_ena_acibitmap() & BIT(ESP_WIFI_ACI_BE)))
       continue;
-    if (esp_wifi_get_tx_statistics(ESP_WIFI_ACI_BE, &tx_stats, tx_fail) !=
-        ESP_OK)
-      continue;
-    esp_wifi_clr_tx_statistics(ESP_WIFI_ACI_BE);
-    uint32_t attempts =
-        tx_stats.tb_times + (tx_stats.tx_enable - tx_stats.tb_last);
-    uint32_t failures = 0;
-    for (int state = TEST_TX_FAIL_RTS; state < TEST_TX_FAIL_MAX; state++)
-      failures += tx_fail[state].count;
-    ESP_LOGI(TAG,
-             "BE ppdu=%" PRIu32 " ok=%" PRIu32 " ack=%" PRIu32 " ba=%" PRIu32
-             " retry=%" PRIu32 " fail=%" PRIu32 " coll=%" PRIu32
-             " tmo=%" PRIu32 " nomem=%" PRIu32 " rtt=%" PRIu32 "/%" PRIu32
-             "/%" PRIu32 "us host=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
-             attempts, tx_stats.tx_succ, tx_stats.rx_ack, tx_stats.rx_ba,
-             tx_stats.retry_edca, failures, tx_stats.collision,
-             tx_stats.timeout, tx_stats.tx_no_mem,
-             attempts ? tx_stats.tx_tot_rtt / attempts : 0,
-             tx_stats.tx_max_rtt, tx_stats.tx_seq_max_rtt, calls, no_mem,
-             run_max);
+    log_tx_stats(ESP_WIFI_ACI_BE, "BE", calls, no_mem, run_max);
+    log_tx_stats(ESP_WIFI_ACI_VI, "VI", 0, 0, 0);
   }
 }
 
 static void enable_tx_stats(void *context, esp_event_base_t base, int32_t id,
                             void *data) {
   esp_wifi_enable_tx_statistics(ESP_WIFI_ACI_BE, true);
+  esp_wifi_enable_tx_statistics(ESP_WIFI_ACI_VI, true);
 }
 #endif
 
