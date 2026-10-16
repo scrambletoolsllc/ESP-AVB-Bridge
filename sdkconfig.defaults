@@ -203,3 +203,8 @@ CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n
 # FreeRTOS to flash: that configuration died on a spinlock recursion
 # assert in the tick hook after ~5 min at line rate.
 CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
+
+# Send Wi-Fi bundles in the video access category (TID 5): shorter
+# contention and retry backoff than best effort. Every station must run
+# an esp_avb that unwraps them.
+CONFIG_ESP_AVB_WIFI_VIDEO_AC=y
