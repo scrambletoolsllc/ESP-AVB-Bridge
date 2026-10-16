@@ -586,7 +586,6 @@ static void probe_task(void *context)
     (void)context;
     /* The radio's identity in esp_hosted_avb's association reports. */
     boot_id = hosted_avb_radio_boot();
-    esp_log_level_set("slave_rpc", ESP_LOG_WARN);
     esp_log_level_set("ptp", ESP_LOG_WARN);
 #if CONFIG_FTM_CLOCK_PROBE_EDGE
     initialize_edge_capture();

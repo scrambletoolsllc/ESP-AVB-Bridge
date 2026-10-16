@@ -86,8 +86,7 @@ static void log_records(void *unused)
 {
     (void)unused;
     responder_record_t record;
-    /* Keep RPC chatter from blocking diagnostic UART output. */
-    esp_log_level_set("slave_rpc",ESP_LOG_WARN);
+    /* Keep PTP chatter from blocking diagnostic UART output. */
     esp_log_level_set("ptp",ESP_LOG_WARN);
     ESP_LOGI("ftm_responder","FTMRESP_BEGIN,1");
     while (xQueueReceive(queue,&record,portMAX_DELAY)==pdPASS) {

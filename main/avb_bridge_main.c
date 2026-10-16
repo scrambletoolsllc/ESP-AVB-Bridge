@@ -32,7 +32,6 @@
 #include <esp_eth.h>
 #include <esp_eth_phy_ip101.h>
 #include <esp_event.h>
-#include <esp_hosted_misc.h>
 #include <esp_intr_alloc.h>
 #include <esp_log.h>
 #include <esp_netif.h>
@@ -44,6 +43,7 @@
 #include <ethernet_init.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <hosted_avb_peer.h>
 #include <hosted_avb_proto.h>
 #include <sdkconfig.h>
 #include <string.h>
@@ -116,11 +116,10 @@ static void on_ap_sta_disconnected(void *arg, esp_event_base_t base,
  * sdio_rx_buf unpacks another into the queue sdio_process_rx drains. At
  * one priority sdio_read got the core whenever the other two were
  * preempted (FreeRTOS resumes the next thread of equal priority) or
- * sdio_rx_buf waited on a full queue, and ran out of free buffers; 2.x
- * dropped those reads, about 40 an hour, 3.x waits for a buffer. So it
- * runs one level below both. esp-hosted 3.x starts its RPC threads at
- * priority 5, below the bridge's own work; they get back the 23 they
- * had in 2.x. */
+ * sdio_rx_buf waited on a full queue, ran out of free buffers and had to
+ * wait for one. So it runs one level below both. esp-hosted starts its
+ * RPC threads at priority 5, below the bridge's own work; they run at
+ * 23. */
 void hosted_thread_placement(const char *tname, uint32_t *tprio,
                              BaseType_t *core_id) {
   if (strcmp(tname, "sdio_rx_buf") == 0 ||
@@ -216,11 +215,11 @@ static void disable_ap_11b_rates(void) {
                                                 .disable = 1};
   s_ap_11b_acked = xSemaphoreCreateBinary();
   if (s_ap_11b_acked == NULL ||
-      esp_hosted_register_custom_callback(HOSTED_AVB_MSG_CONFIG_11B_RATE_ACK,
-                                          on_ap_11b_rate_ack, NULL) != ESP_OK ||
-      esp_hosted_send_custom_data(HOSTED_AVB_MSG_CONFIG_11B_RATE_REQ,
-                                  (const uint8_t *)&request,
-                                  sizeof(request)) != ESP_OK) {
+      hosted_avb_peer_register(HOSTED_AVB_MSG_CONFIG_11B_RATE_ACK,
+                               on_ap_11b_rate_ack, NULL) != ESP_OK ||
+      hosted_avb_peer_send(HOSTED_AVB_MSG_CONFIG_11B_RATE_REQ,
+                           (const uint8_t *)&request,
+                           sizeof(request)) != ESP_OK) {
     ESP_LOGW(TAG, "802.11b request not sent; beacons stay at 1 Mbps");
     return;
   }

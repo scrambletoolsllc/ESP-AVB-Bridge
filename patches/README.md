@@ -8,13 +8,6 @@ and one to the coprocessor's copy in
 dependencies are ignored by Git; reapply these patches when regenerating
 them.
 
-The 2.x patches for the station list NULL response, concurrent
-synchronous RPC, the AP event MAC, the SDIO receive wait, SDIO transmit
-coalescing and the association lifecycle hooks are gone: 3.x fixes the
-first four, aggregates SDIO frames in both directions itself, and
-esp_hosted_avb follows associations through the 3.x coprocessor's Wi-Fi
-events.
-
 `esp-hosted-thread-placement-queue-space.patch` adds two host-side hooks
 for a bridge that forwards a stream. A weak `hosted_thread_placement`
 lets the application set each hosted thread's priority and core by name,
@@ -23,9 +16,8 @@ queue to the coprocessor. Unpinned, the SDIO threads preempted `emac_rx`
 on its own core at every hand-off, and an 8000 frame/s Class B stream
 overflowed the EMAC RX ring and cost the bridge gPTP, MSRP and the beacon
 refresh. The bridge moves the hosted threads to core 1, runs `sdio_read`
-below `sdio_rx_buf` and `sdio_process_rx`, gives the RPC threads back the
-priority they had in 2.x, and keeps four queue entries for control
-frames.
+below `sdio_rx_buf` and `sdio_process_rx`, raises the RPC threads from 5
+to 23, and keeps four queue entries for control frames.
 
 The patch also fixes a write after free in `eh_host_port_task_create`.
 The task handle was stored through the task's own wrapper, which a
