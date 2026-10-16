@@ -36,9 +36,11 @@
 #include <esp_intr_alloc.h>
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_timer.h>
 #include <esp_ptp.h>
 #include <esp_vfs_l2tap.h>
 #include <esp_wifi.h>
+#include <eth_phy_802_3_regs.h>
 #include <ethernet_init.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -395,6 +397,49 @@ static void console_use_driver(void) {
 #endif
 }
 
+#ifdef CONFIG_ESP_AVB_WIFI_BUNDLE
+/* On some boots the MAC discards a few percent of received frames for
+ * bad CRC for as long as the link stays up, while other boots of the same
+ * image are clean; a new link negotiation clears it. The stream frames
+ * found missing on arrival are those frames, so renegotiate the link when
+ * they keep going missing (about 4 s without Ethernet), and after three
+ * tries reset the PHY instead. */
+#define LINK_LOSS_LIMIT 10 /* frames in each of two checks */
+#define LINK_RETRY_INTERVAL_S 30
+static uint32_t s_link_renegotiations;
+
+static void link_loss_check(void) {
+  static uint32_t lost_previous;
+  static int64_t last_action_us;
+  static bool lossy_before;
+  uint32_t lost = 0;
+  avb_bridge_bundle_ingress_stats(&lost, NULL, NULL);
+  uint32_t lost_new = lost - lost_previous;
+  lost_previous = lost;
+  /* One sequence jump, such as a talker restart, is not a lossy link. */
+  bool lossy = lost_new >= LINK_LOSS_LIMIT;
+  bool persistent = lossy && lossy_before;
+  lossy_before = lossy;
+  int64_t now_us = esp_timer_get_time();
+  if (!persistent || now_us < 10000000 ||
+      now_us - last_action_us < LINK_RETRY_INTERVAL_S * 1000000LL)
+    return;
+  last_action_us = now_us;
+  uint32_t bmcr = 0;
+  esp_eth_phy_reg_rw_data_t reg_access = {.reg_addr = ETH_PHY_BMCR_REG_ADDR,
+                                          .reg_value_p = &bmcr};
+  if (esp_eth_ioctl(s_eth_handle, ETH_CMD_READ_PHY_REG, &reg_access) != ESP_OK)
+    return;
+  bool reset_phy = ++s_link_renegotiations > 3;
+  /* BMCR bit 15 resets the PHY, bit 9 restarts autonegotiation. */
+  bmcr |= reset_phy ? 0x8000 : 0x0200;
+  esp_eth_ioctl(s_eth_handle, ETH_CMD_WRITE_PHY_REG, &reg_access);
+  ESP_LOGW(TAG, "ingress: %lu frames lost, %s (%lu)", (unsigned long)lost_new,
+           reset_phy ? "reset the PHY" : "renegotiating the link",
+           (unsigned long)s_link_renegotiations);
+}
+#endif
+
 void app_main(void) {
   console_use_driver();
   xTaskCreate(heap_census_task, "heap_census", 4096, NULL, 3, NULL);
@@ -482,6 +527,9 @@ void app_main(void) {
   uint32_t first_ucast_ms = 0;
   while (1) {
     vTaskDelay(pdMS_TO_TICKS(5000));
+#ifdef CONFIG_ESP_AVB_WIFI_BUNDLE
+    link_loss_check();
+#endif
     uint32_t eth_ok = 0, eth_fail = 0, wifi_ok = 0, wifi_fail = 0, wifi_oom = 0;
     avb_bridge_forward_stats(&eth_ok, &eth_fail, &wifi_ok, &wifi_fail,
                              &wifi_oom);
