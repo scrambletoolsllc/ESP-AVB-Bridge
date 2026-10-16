@@ -501,6 +501,10 @@ void app_main(void) {
     uint32_t in_lost = 0, in_late = 0, in_bypass = 0, split_fail = 0;
     uint32_t pace_no_tspec = 0, pace_no_entry = 0;
     avb_bridge_pacer_bypass_stats(&pace_no_tspec, &pace_no_entry);
+    uint32_t pace_alarms = 0, pace_wakeups = 0, pace_task_sent = 0,
+             pace_forward_sent = 0, pace_arm_fail = 0;
+    avb_bridge_pacer_wake_stats(&pace_alarms, &pace_wakeups, &pace_task_sent,
+                                &pace_forward_sent, &pace_arm_fail);
 #ifdef CONFIG_ESP_AVB_WIFI_BUNDLE
     avb_bridge_forward_stats_bundles(&bundles_tx, &bundle_frames_tx);
     avb_bridge_retx_stats(&retx_nacks, &retx_sent, &retx_stale);
@@ -521,7 +525,9 @@ void app_main(void) {
 #ifdef CONFIG_ESP_AVB_WIFI_UNICAST_STREAMS
              "readdr=%lu/nomap=%lu/bpdrop=%lu/restore=%lu  "
 #endif
-             "paced=%lu/%lu depth=%lu bypass=%lu/%lu  bundles tx=%lu/%lu rx=%lu/%lu  "
+             "paced=%lu/%lu depth=%lu bypass=%lu/%lu  "
+             "pacer alarm=%lu wake=%lu released=%lu/%lu armfail=%lu  "
+             "bundles tx=%lu/%lu rx=%lu/%lu  "
              "ingress lost=%lu late=%lu bypass=%lu split_fail=%lu  "
              "retx nack=%lu req=%lu sent=%lu late=%lu spaced=%lu evicted=%lu "
              "noslot=%lu noroom=%lu txfail=%lu  "
@@ -537,7 +543,10 @@ void app_main(void) {
 #endif
              (unsigned long)paced, (unsigned long)pace_overflow,
              (unsigned long)pace_depth, (unsigned long)pace_no_tspec,
-             (unsigned long)pace_no_entry, (unsigned long)bundles_tx,
+             (unsigned long)pace_no_entry, (unsigned long)pace_alarms,
+             (unsigned long)pace_wakeups, (unsigned long)pace_task_sent,
+             (unsigned long)pace_forward_sent, (unsigned long)pace_arm_fail,
+             (unsigned long)bundles_tx,
              (unsigned long)bundle_frames_tx, (unsigned long)bundles_rx,
              (unsigned long)bundle_frames_rx, (unsigned long)in_lost,
              (unsigned long)in_late, (unsigned long)in_bypass,
